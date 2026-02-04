@@ -1,0 +1,42 @@
+# Build artifacts
+build/
+bin/
+*.o
+*.so
+*.a
+
+# Executables
+fused_fs
+*.out
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+.dockerignore
+
+# Test artifacts
+/tmp/fused_*
+
+# Logs
+*.log
+syslog
+
+# Core dumps
+core
+core.*
+
+# Mount points
+mnt/
+mount/
