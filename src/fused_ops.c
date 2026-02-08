@@ -74,7 +74,7 @@ int fused_getattr(const char *path, struct stat *stbuf) {
     stbuf->st_ctime = inode->ctime;
 
     stbuf->st_blksize = 4096;
-    stdbuf->st_blocks = (inode->size + 511) / 512;
+    stbuf->st_blocks = (inode->size + 511) / 512;
 
     return 0;
 }
@@ -140,7 +140,50 @@ int fused_open(const char *path, struct fuse_file_info *fi) {
  */
 int fused_read(const char *path, char *buf, size_t size, off_t offset,
                struct fuse_file_info *fi) {
-    return to_read;
+    (void) path;  // Use inode from file handle instead
+    
+    log_message("read: inode=%lu, size=%zu, offset=%ld", fi->fh, size, offset);
+    
+    // Get inode directly from file handle (set in fused_open)
+    fused_inode_t *inode = lookup_inode(fi->fh);
+    if (!inode) {
+        log_message("read: inode %lu not found", fi->fh);
+        return -ENOENT;
+    }
+    
+    // Check if offset is beyond file size
+    if (offset >= inode->size) {
+        return 0;
+    }
+    
+    // Calculate how much to read
+    size_t to_read = size;
+    if (offset + to_read > (size_t)inode->size) {
+        to_read = inode->size - offset;
+    }
+
+    // Open the backing file for reading
+    FILE *fp = fopen(inode->backing_path, "rb"); // Note: FILE will depend on how create is made
+    if (!fp) {
+        log_message("read: failed to open backing file %s", inode->backing_path);
+        return -EIO;
+    }
+    
+    // Seek to offset and read
+    if (fseek(fp, offset, SEEK_SET) != 0) {
+        fclose(fp);
+        return -EIO;
+    }
+    
+    size_t bytes_read = fread(buf, 1, to_read, fp);
+    fclose(fp);
+    
+    // Update access time
+    inode->atime = time(NULL);
+    
+    log_message("read: successfully read %zu bytes from inode %lu", bytes_read, fi->fh);
+    
+    return bytes_read;
 }
 
 /**
@@ -148,7 +191,38 @@ int fused_read(const char *path, char *buf, size_t size, off_t offset,
  */
 int fused_write(const char *path, const char *buf, size_t size, off_t offset,
                 struct fuse_file_info *fi) {
-    return size;
+    (void) path;  // Use inode from file handle instead
+    
+    log_message("write: inode=%lu, size=%zu, offset=%ld", fi->fh, size, offset);
+    
+    }
+    
+    // If there's a gap between current size and offset, fill with zeros
+    if (offset > inode->size) {
+        size_t gap = offset - inode->size;
+            fwrite(zero_buf, 1, write_size, fp);
+            gap -= write_size;
+        }
+    }
+    
+    // Write the data
+    size_t bytes_written = fwrite(buf, 1, size, fp);
+    fclose(fp);
+    
+    if (bytes_written != size) {
+        log_message("write: partial write - wrote %zu of %zu bytes", bytes_written, size);
+        return -EIO;
+    }
+    
+    // Update inode metadata
+    inode->size = offset + bytes_written;
+    inode->mtime = time(NULL);
+    inode->ctime = time(NULL);
+    
+    log_message("write: successfully wrote %zu bytes to inode %lu (new size: %ld)", 
+               bytes_written, fi->fh, inode->size);
+    
+    return bytes_written;
 }
 
 /**
@@ -199,6 +273,14 @@ static fused_inode_t* lookup_inode(uint64_t ino) {
         }
     }
     return NULL;
+}
+
+/**
+ * @brief Generate backing file path for an inode
+ */
+static void generate_backing_path(fused_inode_t *inode, uint64_t ino) {
+    snprintf(inode->backing_path, MAX_PATH, "%s/inode_%lu", 
+             g_state->backing_dir, ino);
 }
 
 /**
