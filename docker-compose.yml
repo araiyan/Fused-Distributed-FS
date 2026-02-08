@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  fused-fs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fused_filesystem
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - FUSED_FOREGROUND=0
+    volumes:
+      - fused-data:/mnt/fused:shared
+    stdin_open: true
+    tty: true
+    networks:
+      - fused-network
+
+volumes:
+  fused-data:
+    driver: local
+
+networks:
+  fused-network:
+    driver: bridge
