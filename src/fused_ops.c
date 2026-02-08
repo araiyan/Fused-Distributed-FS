@@ -195,11 +195,35 @@ int fused_write(const char *path, const char *buf, size_t size, off_t offset,
     
     log_message("write: inode=%lu, size=%zu, offset=%ld", fi->fh, size, offset);
     
+    // Get inode directly from file handle (set in fused_open)
+    fused_inode_t *inode = lookup_inode(fi->fh);
+    if (!inode) {
+        log_message("write: inode %lu not found", fi->fh);
+        return -ENOENT;
+    }
+    
+    // Enforce append-only: offset must be at end of file
+    if (offset < inode->size) {
+        log_message("write: REJECTED - append-only mode, offset=%ld < size=%ld", 
+                   offset, inode->size);
+        return -EPERM;
+    }
+
+    // Open the backing file for writing (append mode)
+    FILE *fp = fopen(inode->backing_path, "ab");  // Note: FILE will depend on how create is made
+    if (!fp) {
+        log_message("write: failed to open backing file %s", inode->backing_path);
+        return -EIO;
     }
     
     // If there's a gap between current size and offset, fill with zeros
     if (offset > inode->size) {
         size_t gap = offset - inode->size;
+        char zero_buf[4096];
+        memset(zero_buf, 0, sizeof(zero_buf));
+        
+        while (gap > 0) {
+            size_t write_size = (gap > sizeof(zero_buf)) ? sizeof(zero_buf) : gap;
             fwrite(zero_buf, 1, write_size, fp);
             gap -= write_size;
         }
