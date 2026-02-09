@@ -261,16 +261,104 @@ int fused_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
  * @brief Create a directory
  */
 int fused_mkdir(const char *path, mode_t mode) {
+    log_message("mkdir: %s", path);
+
+    // error if directory already exists
+    if (path_to_inode(path) != NULL) return -EEXIST;
+
+    // separate path into parent and directory
+    char path_copy[MAX_PATH];
+    strncpy(path_copy, path, MAX_PATH - 1);
+    char *last_slash = strrchr(path_copy, '/');
+    
+    char *parent_path;
+    char *dir_name;
+    
+    if (last_slash == path_copy) {
+        parent_path = "/";
+        dir_name = path_copy + 1;
+    } else {
+        *last_slash = '\0';
+        parent_path = path_copy;
+        dir_name = last_slash + 1;
+    }
+
+    fused_inode_t *parent = path_to_inode(parent_path);
+    if (!parent) return -ENOENT;
+    if (!S_ISDIR(parent->mode)) return -ENOTDIR;
+
+    // create the new inode
+    if (g_state->n_inodes >= MAX_INODES) return -ENOSPC;
+
+    fused_inode_t *new_inode = &g_state->inodes[g_state->n_inodes];
+    new_inode->ino = g_state->n_inodes + 1; // Simple incrementing ID
+    new_inode->mode = S_IFDIR | mode;
+    new_inode->uid = getuid();
+    new_inode->gid = getgid();
+    new_inode->size = 4096;
+    new_inode->atime = new_inode->mtime = new_inode->ctime = time(NULL);
+    new_inode->n_children = 0;
+    
+    // register the name in the parent's children list
+    if (parent->n_children >= MAX_CHILDREN) return -ENOSPC;
+    
+    strncpy(parent->child_names[parent->n_children], dir_name, MAX_NAME - 1);
+    parent->n_children++;
+
+    g_state->n_inodes++;
+    
+    log_message("mkdir: created %s (inode %lu)", path, new_inode->ino);
     return 0;
 }
 
 /**
  * @brief Remove a directory
+ * @pre directory is empty
  */
 int fused_rmdir(const char *path) {
-    int ret = 0;
-    (void) path;
-    return ret;
+    log_message("rmdir: %s", path);
+
+    // find the target inode
+    fused_inode_t *inode = path_to_inode(path);
+    if (!inode) return -ENOENT;
+    if (!S_ISDIR(inode->mode)) return -ENOTDIR;
+    if (inode->n_children > 0) return -ENOTEMPTY;
+
+    // find the parent to remove the reference
+    char path_copy[MAX_PATH];
+    strncpy(path_copy, path, MAX_PATH - 1);
+    char *last_slash = strrchr(path_copy, '/');
+    
+    char *parent_path = (last_slash == path_copy) ? "/" : path_copy;
+    if (last_slash != path_copy) *last_slash = '\0';
+    
+    char *dir_name = last_slash + 1;
+
+    fused_inode_t *parent = path_to_inode(parent_path);
+    if (!parent) return -ENOENT;
+
+    // remove the name from parent's child_names array
+    int found = false;
+    for (int i = 0; i < parent->n_children; i++) {
+        if (strcmp(parent->child_names[i], dir_name) == 0) {
+            // Shift remaining children left to fill the gap
+            for (int j = i; j < parent->n_children - 1; j++) {
+                strncpy(parent->child_names[j], parent->child_names[j+1], MAX_NAME);
+            }
+            parent->n_children--;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) return -ENOENT;
+
+    // delete inode
+    memset(inode, 0, sizeof(fused_inode_t)); 
+
+    log_message("rmdir: successfully removed %s", path);
+    return 0;
+
 }
 
 /**
