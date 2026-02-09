@@ -2,15 +2,29 @@
 # Makefile for building the filesystem
 
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -D_FILE_OFFSET_BITS=64 -I./include
-LDFLAGS = -lfuse -lpthread
+CFLAGS = -Wall -Wextra -O2 -D_FILE_OFFSET_BITS=64 -I./include $(shell pkg-config fuse --cflags)
+LDFLAGS = -lfuse -lpthread $(shell pkg-config fuse --libs)
 # Directories
 SRC_DIR = src
 INC_DIR = include
 BUILD_DIR = build
 BIN_DIR = bin
+
+# Target binary
+TARGET = $(BIN_DIR)/fused
+
+# Source and object files
+SOURCES = $(wildcard $(SRC_DIR)/*.c)
+OBJECTS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES))
+
+
 # Default target
 all: directories $(TARGET)
+
+# Create necessary directories
+directories:
+	@mkdir -p $(BUILD_DIR) $(BIN_DIR)
+
 # Build the main executable
 $(TARGET): $(OBJECTS)
 	@echo "Linking $@..."

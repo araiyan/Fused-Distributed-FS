@@ -268,6 +268,8 @@ int fused_mkdir(const char *path, mode_t mode) {
  * @brief Remove a directory
  */
 int fused_rmdir(const char *path) {
+    int ret = 0;
+    (void) path;
     return ret;
 }
 

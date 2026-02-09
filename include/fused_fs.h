@@ -26,6 +26,9 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <stdarg.h>
 
 /**
  * @brief Minimal inode structure
