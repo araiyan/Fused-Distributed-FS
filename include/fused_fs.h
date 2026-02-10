@@ -14,6 +14,7 @@
 #define MAX_CHILDREN 1024
 #define MAX_INODES 4096
 #define FUSE_ROOT_ID 1
+#define MAX_NAME 256
 
 #include <fuse.h>
 #include <stdio.h>
@@ -29,6 +30,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <stdarg.h>
+#include <stdbool.h>
 
 /**
  * @brief Minimal inode structure
