@@ -4,6 +4,7 @@
  */
 
 #include "fused_fs.h"
+#include <stdint.h>
 #include <sys/stat.h>
 #include <string.h>
 #include <errno.h>
@@ -253,7 +254,42 @@ int fused_write(const char *path, const char *buf, size_t size, off_t offset,
  * @brief Create a new file
  */
 int fused_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-    (void) fi;
+  fused_inode_t *existing = path_to_inode(path);
+  if (existing){
+    return -EEXIST;
+  }
+  char parent_path[MAX_PATH];
+  char child_name[MAX_NAME];
+  split_path(path, parent_path, child_name);
+
+  fused_inode_t *parent = path_to_inode(parent_path);
+
+  if (!parent || !S_ISDIR(parent->mode)){
+    return -ENOENT;
+  }
+  fused_inode_t *inode = alloc_inode();
+  if (!inode){
+    return -ENOMEM;
+  }
+  // overwrite file type as 'regular'
+  inode->mode = S_IFREG | (mode & 0777);
+  inode->uid = fuse_get_context()->uid;
+  inode->gid = fuse_get_context()->gid;
+  inode->size = 0;
+
+  // accessed, modified, and created now
+  inode->atime = time(NULL);
+  inode->mtime = inode->atime;
+  inode->ctime = inode->atime;
+
+  int rc = dir_add_entry(parent, child_name, inode);
+  if (rc != 0){
+    free_inode(inode);
+    return rc;
+  }
+
+  fi->fh = (uint64_t) inode;
+
     return 0;
 }
 
@@ -270,10 +306,10 @@ int fused_mkdir(const char *path, mode_t mode) {
     char path_copy[MAX_PATH];
     strncpy(path_copy, path, MAX_PATH - 1);
     char *last_slash = strrchr(path_copy, '/');
-    
+
     char *parent_path;
     char *dir_name;
-    
+
     if (last_slash == path_copy) {
         parent_path = "/";
         dir_name = path_copy + 1;
@@ -298,15 +334,15 @@ int fused_mkdir(const char *path, mode_t mode) {
     new_inode->size = 4096;
     new_inode->atime = new_inode->mtime = new_inode->ctime = time(NULL);
     new_inode->n_children = 0;
-    
+
     // register the name in the parent's children list
     if (parent->n_children >= MAX_CHILDREN) return -ENOSPC;
-    
+
     strncpy(parent->child_names[parent->n_children], dir_name, MAX_NAME - 1);
     parent->n_children++;
 
     g_state->n_inodes++;
-    
+
     log_message("mkdir: created %s (inode %lu)", path, new_inode->ino);
     return 0;
 }
@@ -328,10 +364,10 @@ int fused_rmdir(const char *path) {
     char path_copy[MAX_PATH];
     strncpy(path_copy, path, MAX_PATH - 1);
     char *last_slash = strrchr(path_copy, '/');
-    
+
     char *parent_path = (last_slash == path_copy) ? "/" : path_copy;
     if (last_slash != path_copy) *last_slash = '\0';
-    
+
     char *dir_name = last_slash + 1;
 
     fused_inode_t *parent = path_to_inode(parent_path);
@@ -365,6 +401,38 @@ int fused_rmdir(const char *path) {
  * @brief Rename a file or directory
  */
 int fused_rename(const char *from, const char *to) {
+  fused_inode_t *inode = path_to_inode(from);
+  if (!inode){
+    return -ENOENT;
+  }
+  fused_inode_t *existing = path_to_inode(to);
+  if (existing){
+    // TODO: change to overwrite delete at the end
+    return -EEXIST;
+
+  }
+  char parent_path[MAX_PATH];
+  char child_name[MAX_NAME];
+  split_path(from, parent_path, child_name);
+
+  fused_inode_t *parent = path_to_inode(parent_path);
+  int rc = dir_rm_entry(parent, child_name, inode)
+  if (rc != 0){
+    free_inode(inode);
+    return rc;
+  }
+
+  // accessed, and modified now
+  inode->atime = time(NULL);
+  inode->mtime = inode->atime;
+
+  split_path(to, parent_path, child_name)
+  fused_inode_t *parent = path_to_inode(parent_path);
+  int rc = dir_add_entry(parent, child_name, inode);
+  if (rc != 0){
+    free_inode(inode);
+    return rc;
+  }
     return 0;
 }
 
