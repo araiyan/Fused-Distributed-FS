@@ -12,6 +12,17 @@
 
 #define FUSE_ROOT_ID 1
 
+/* Forward declarations of static helper functions */
+static void init_root_inode(void);
+static void split_path(const char *path, char *parent_path, char *child_name);
+static fused_inode_t* alloc_inode(void);
+static void free_inode(fused_inode_t *inode);
+static int dir_add_entry(fused_inode_t *dir, const char *name, fused_inode_t *child);
+static int dir_rm_entry(fused_inode_t *dir, const char *name, fused_inode_t *child);
+static fused_inode_t* lookup_inode(uint64_t ino);
+static void generate_backing_path(fused_inode_t *inode, uint64_t ino);
+static fused_inode_t* path_to_inode(const char *path);
+
 /**
  * @brief Initialize filesystem
  */
@@ -288,7 +299,7 @@ int fused_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
     return rc;
   }
 
-  fi->fh = (uint64_t) inode;
+  fi->fh = inode->ino;
 
     return 0;
 }
@@ -416,7 +427,7 @@ int fused_rename(const char *from, const char *to) {
   split_path(from, parent_path, child_name);
 
   fused_inode_t *parent = path_to_inode(parent_path);
-  int rc = dir_rm_entry(parent, child_name, inode)
+  int rc = dir_rm_entry(parent, child_name, inode);
   if (rc != 0){
     free_inode(inode);
     return rc;
@@ -426,9 +437,9 @@ int fused_rename(const char *from, const char *to) {
   inode->atime = time(NULL);
   inode->mtime = inode->atime;
 
-  split_path(to, parent_path, child_name)
-  fused_inode_t *parent = path_to_inode(parent_path);
-  int rc = dir_add_entry(parent, child_name, inode);
+  split_path(to, parent_path, child_name);
+  parent = path_to_inode(parent_path);
+  rc = dir_add_entry(parent, child_name, inode);
   if (rc != 0){
     free_inode(inode);
     return rc;

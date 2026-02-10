@@ -84,12 +84,6 @@ int fused_rename(const char *from, const char *to);
 /* Global state */
 extern fused_state_t *g_state;
 
-/* Helper function declarations */
-static fused_inode_t* lookup_inode(uint64_t ino);
-static fused_inode_t* path_to_inode(const char *path);
-static void init_root_inode(void);
-static void generate_backing_path(fused_inode_t *inode, uint64_t ino);
-
 /* Helper function for logging */
 void log_message(const char *fmt, ...);
 

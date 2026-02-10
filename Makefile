@@ -41,6 +41,24 @@ clean:
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR) $(BIN_DIR)
 	@echo "Clean complete"
+
+# Install the filesystem binary
+install: $(TARGET)
+	@echo "Installing $(TARGET) to /usr/local/bin/..."
+	@install -m 755 $(TARGET) /usr/local/bin/fused_fs
+	@echo "Installation complete"
+
+# Uninstall
+uninstall:
+	@echo "Removing /usr/local/bin/fused_fs..."
+	@rm -f /usr/local/bin/fused_fs
+	@echo "Uninstall complete"
+
 # Show help
 help:
 	@echo "FUSED Filesystem - Makefile targets:"
+	@echo "  make all       - Build the filesystem (default)"
+	@echo "  make clean     - Remove build artifacts"
+	@echo "  make install   - Install to /usr/local/bin"
+	@echo "  make uninstall - Remove from /usr/local/bin"
+	@echo "  make help      - Show this help message"

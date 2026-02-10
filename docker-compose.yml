@@ -14,7 +14,7 @@ services:
     environment:
       - FUSED_FOREGROUND=0
     volumes:
-      - fused-data:/mnt/fused:shared
+      - fused-data:/mnt/fused
     stdin_open: true
     tty: true
     networks:
