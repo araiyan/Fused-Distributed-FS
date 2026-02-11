@@ -64,9 +64,9 @@ docker-compose up -d
 docker-compose ps
 
 # Test the filesystem
-docker exec -it fused_filesystem ls -la /mnt/fused
-docker exec -it fused_filesystem sh -c 'echo "Hello" > /mnt/fused/test.txt'
-docker exec -it fused_filesystem cat /mnt/fused/test.txt
+docker exec -it fused_fs ls -la /mnt/fused
+docker exec -it fused_fs sh -c 'echo "Hello" > /mnt/fused/test.txt'
+docker exec -it fused_fs cat /mnt/fused/test.txt
 
 # Get an interactive shell
 docker exec -it fused_filesystem /bin/bash
