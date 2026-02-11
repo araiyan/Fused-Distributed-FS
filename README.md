@@ -69,7 +69,7 @@ docker exec -it fused_fs sh -c 'echo "Hello" > /mnt/fused/test.txt'
 docker exec -it fused_fs cat /mnt/fused/test.txt
 
 # Get an interactive shell
-docker exec -it fused_filesystem /bin/bash
+docker exec -it fused_fs /bin/bash
 
 # View logs
 docker-compose logs -f
