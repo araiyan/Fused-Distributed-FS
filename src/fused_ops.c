@@ -365,6 +365,19 @@ int fused_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 }
 
 /**
+ * @brief Update file timestamps (utimens)
+ */
+int fused_utimens(const char *path, const struct timespec tv[2])
+{
+    (void)path;
+    (void)tv;
+
+    // TODO: Implement utimens to update atime and mtime based on tv array
+    return 0;
+}
+
+
+/**
  * @brief Create a directory
  */
 int fused_mkdir(const char *path, mode_t mode)

@@ -25,6 +25,7 @@ static struct fuse_operations fused_oper = {
     .mkdir      = fused_mkdir,
     .rmdir      = fused_rmdir,
     .rename     = fused_rename,
+    .utimens    = fused_utimens,
 };
 /**
  * @brief Main entry point

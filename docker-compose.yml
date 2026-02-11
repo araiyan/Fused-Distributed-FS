@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: fused_filesystem
+    container_name: fused_fs
     privileged: true
     devices:
       - /dev/fuse
