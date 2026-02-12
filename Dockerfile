@@ -25,8 +25,8 @@ RUN make clean && make all && make install
 RUN mkdir -p /mnt/fused
 
 # Add entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Expose volume for mount point
 VOLUME ["/mnt/fused"]
