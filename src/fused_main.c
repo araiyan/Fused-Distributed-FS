@@ -7,9 +7,6 @@
 #include <syslog.h>
 #include <unistd.h>
 
-/* Global state pointer */
-fused_state_t *g_state = NULL;
-
 /**
  * @brief FUSE operations structure (append-only, optimized for shorts)
  */

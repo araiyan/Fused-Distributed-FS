@@ -23,6 +23,9 @@ static fused_inode_t *lookup_inode(uint64_t ino);
 static void generate_backing_path(fused_inode_t *inode, uint64_t ino);
 static fused_inode_t *path_to_inode(const char *path);
 
+/* Global state pointer */
+fused_state_t *g_state = NULL;
+
 /**
  * @brief Initialize filesystem
  */

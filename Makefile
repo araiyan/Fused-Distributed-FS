@@ -62,3 +62,27 @@ help:
 	@echo "  make install   - Install to /usr/local/bin"
 	@echo "  make uninstall - Remove from /usr/local/bin"
 	@echo "  make help      - Show this help message"
+
+# Testing targets
+TEST_DIR = tests
+TEST_BIN = $(BIN_DIR)/unit_tests
+TEST_LDFLAGS = $(LDFLAGS) -lcunit
+
+$(TEST_BIN): directories $(BUILD_DIR)/unit_tests.o $(BUILD_DIR)/fused_ops.o
+	@echo "Linking unit tests..."
+	@$(CC) $(BUILD_DIR)/unit_tests.o $(BUILD_DIR)/fused_ops.o -o $@ $(TEST_LDFLAGS)
+
+$(BUILD_DIR)/unit_tests.o: $(TEST_DIR)/unit_tests.c
+	@echo "Compiling $<..."
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+test-unit: $(TEST_BIN)
+	@$(TEST_BIN)
+
+test-functional:
+	@chmod +x $(TEST_DIR)/functional_test.sh
+	@$(TEST_DIR)/functional_test.sh
+
+test: test-unit test-functional
+
+.PHONY: test test-unit test-functional
