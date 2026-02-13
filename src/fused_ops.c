@@ -372,10 +372,38 @@ int fused_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  */
 int fused_utimens(const char *path, const struct timespec tv[2])
 {
-    (void)path;
-    (void)tv;
-
-    // TODO: Implement utimens to update atime and mtime based on tv array
+    log_message("utimens: %s", path);
+    
+    fused_inode_t *inode = path_to_inode(path);
+    if (!inode)
+    {
+        return -ENOENT;
+    }
+    
+    // Update access time (tv[0])
+    if (tv[0].tv_nsec == UTIME_NOW)
+    {
+        inode->atime = time(NULL);
+    }
+    else if (tv[0].tv_nsec != UTIME_OMIT)
+    {
+        inode->atime = tv[0].tv_sec;
+    }
+    
+    // Update modification time (tv[1])
+    if (tv[1].tv_nsec == UTIME_NOW)
+    {
+        inode->mtime = time(NULL);
+    }
+    else if (tv[1].tv_nsec != UTIME_OMIT)
+    {
+        inode->mtime = tv[1].tv_sec;
+    }
+    
+    // Always update ctime when any metadata changes
+    inode->ctime = time(NULL);
+    
+    log_message("utimens: updated timestamps for %s (inode %lu)", path, inode->ino);
     return 0;
 }
 
