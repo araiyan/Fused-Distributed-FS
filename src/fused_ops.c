@@ -415,68 +415,51 @@ int fused_mkdir(const char *path, mode_t mode)
 {
     log_message("mkdir: %s", path);
 
-    // error if directory already exists
-    if (path_to_inode(path) != NULL)
+    // Check if directory already exists
+    fused_inode_t *existing = path_to_inode(path);
+    if (existing)
+    {
         return -EEXIST;
-
-    // separate path into parent and directory
-    char path_copy[MAX_PATH];
-    strncpy(path_copy, path, MAX_PATH - 1);
-    path_copy[MAX_PATH - 1] = '\0';
-    char *last_slash = strrchr(path_copy, '/');
-
-    char *parent_path;
-    char *dir_name;
-
-    if (last_slash == path_copy)
-    {
-        parent_path = "/";
-        dir_name = path_copy + 1;
-    }
-    else
-    {
-        *last_slash = '\0';
-        parent_path = path_copy;
-        dir_name = last_slash + 1;
     }
 
+    // Split path into parent and directory name
+    char parent_path[MAX_PATH];
+    char dir_name[MAX_NAME];
+    split_path(path, parent_path, dir_name);
+
+    // Get parent directory
     fused_inode_t *parent = path_to_inode(parent_path);
-    if (!parent)
+    if (!parent || !S_ISDIR(parent->mode))
+    {
         return -ENOENT;
-    if (!S_ISDIR(parent->mode))
-        return -ENOTDIR;
+    }
 
-    // create the new inode
-    if (g_state->n_inodes >= MAX_INODES)
-        return -ENOSPC;
+    // Allocate new inode for directory
+    fused_inode_t *inode = alloc_inode();
+    if (!inode)
+    {
+        return -ENOMEM;
+    }
 
-    fused_inode_t *new_inode = &g_state->inodes[g_state->n_inodes];
-    memset(new_inode, 0, sizeof(fused_inode_t));
+    // Initialize directory inode
+    inode->mode = S_IFDIR | (mode & 0777);
+    inode->uid = fuse_get_context()->uid;
+    inode->gid = fuse_get_context()->gid;
+    inode->size = 4096;
+    inode->atime = time(NULL);
+    inode->mtime = inode->atime;
+    inode->ctime = inode->atime;
+    inode->n_children = 0;
 
-    new_inode->ino = g_state->n_inodes + 1;
-    generate_backing_path(new_inode, new_inode->ino);
+    // Add directory entry to parent
+    int rc = dir_add_entry(parent, dir_name, inode);
+    if (rc != 0)
+    {
+        free_inode(inode);
+        return rc;
+    }
 
-    new_inode->mode = S_IFDIR | (mode & 0777);
-    new_inode->uid = getuid();
-    new_inode->gid = getgid();
-    new_inode->size = 4096;
-    new_inode->atime = new_inode->mtime = new_inode->ctime = time(NULL);
-    new_inode->n_children = 0;
-
-    // register the name in the parent's children list
-    if (parent->n_children >= MAX_CHILDREN)
-        return -ENOSPC;
-
-    strncpy(parent->child_names[parent->n_children], dir_name, MAX_NAME - 1);
-    parent->child_names[parent->n_children][MAX_NAME - 1] = '\0';
-    parent->child_inodes[parent->n_children] = new_inode->ino;
-    parent->n_children++;
-    parent->mtime = time(NULL);
-    parent->ctime = parent->mtime;
-
-    g_state->n_inodes++;
-
-    log_message("mkdir: created %s (inode %lu)", path, new_inode->ino);
+    log_message("mkdir: created %s (inode %lu)", path, inode->ino);
     return 0;
 }
 
@@ -727,24 +710,36 @@ static fused_inode_t *alloc_inode(void)
     inode->ino = g_state->n_inodes + 1;
     generate_backing_path(inode, inode->ino);
 
+    // Note: n_inodes is incremented here, so if the caller fails,
+    // they must call free_inode() which will handle rollback
     g_state->n_inodes++;
     return inode;
 }
 
 /**
  * @brief Free an inode (mark as unused)
- * Note: This simple implementation does not reuse freed inodes, but it does clean up backing files.
+ * This implementation handles rollback if the inode was just allocated.
+ * Fixed: Now properly decrements n_inodes to prevent zombie inodes.
  */
 static void free_inode(fused_inode_t *inode)
 {
     if (!inode)
         return;
 
+    // Clean up backing file if it exists
     if (inode->backing_path[0] != '\0')
     {
         unlink(inode->backing_path);
     }
 
+    // If this is the most recently allocated inode, we can safely roll back
+    // by decrementing n_inodes. This prevents "holes" in the inode array.
+    if (inode == &g_state->inodes[g_state->n_inodes - 1])
+    {
+        g_state->n_inodes--;
+    }
+
+    // Clear the inode slot
     memset(inode, 0, sizeof(fused_inode_t));
 }
 
