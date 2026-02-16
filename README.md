@@ -10,13 +10,13 @@ Fused-FS/
 │   └── fused_fs.h          # Main header file
 ├── src/
 │   ├── fused_main.c        # Entry point and initialization
-│   ├── fused_ops.c         # FUSE operations implementation
+│   └── fused_ops.c         # FUSE operations implementation
 ├── scripts/
 │   └── build_docker.sh     # Docker build helper
 ├── tests/
 │   ├── unit_tests.c        # CUnit test suite
-│   ├── functional_test.sh  # Functional test script
-├── Makefile                # Build configuration
+│   └── functional_test.sh  # Functional test script
+└── Makefile                # Build configuration
 ```
 ## Requirements
 
