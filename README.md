@@ -13,6 +13,9 @@ Fused-FS/
 │   ├── fused_ops.c         # FUSE operations implementation
 ├── scripts/
 │   └── build_docker.sh     # Docker build helper
+├── tests/
+│   ├── unit_tests.c        # CUnit test suite
+│   ├── functional_test.sh  # Functional test script
 ├── Makefile                # Build configuration
 ```
 ## Requirements
@@ -21,6 +24,7 @@ Fused-FS/
 - GCC compiler
 - libfuse-dev (FUSE development files)
 - Linux kernel with FUSE support
+- libcunit1 (for unit tests)
 
 ### Docker Build
 - Docker Engine 20.10+
@@ -97,6 +101,27 @@ docker exec -it fused_fs cat /mnt/fused/hello.txt
 # Stop the container
 docker stop fused_fs
 docker rm fused_fs
+```
+## Testing
+
+### Unit Tests
+Unit tests validate individual FUSE callbacks (getattr, readdir, etc.) using CUnit.
+```bash
+# Inside Docker container
+docker exec fused_fs bash -c "cd /app && make test-unit"
+
+# Local build (requires libcunit1-dev)
+make test-unit
+```
+
+### Functional Tests
+Functional tests verify end-to-end filesystem operations by mounting the filesystem and performing real file operations.
+```bash
+# Inside Docker container
+docker exec fused_fs bash -c "cd /app && make test-functional"
+
+# Run all tests (unit + functional)
+docker exec fused_fs bash -c "cd /app && make test"
 ```
 
 ## Acknowledgments
