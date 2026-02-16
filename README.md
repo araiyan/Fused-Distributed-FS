@@ -73,7 +73,9 @@ docker exec -it fused_fs sh -c 'echo "Hello" > /mnt/fused/test.txt'
 docker exec -it fused_fs cat /mnt/fused/test.txt
 
 # Get an interactive shell
-docker exec -it fused_fs /bin/bash
+docker run -it --rm --privileged --entrypoint="" fused-fs:latest bash
+# Then inside container:
+mkdir -p /mnt/test && /usr/local/bin/fused_fs /mnt/test -o allow_other && cd /mnt/test
 
 # View logs
 docker-compose logs -f
