@@ -81,6 +81,7 @@ int fused_mkdir(const char *path, mode_t mode);
 int fused_rmdir(const char *path);
 int fused_rename(const char *from, const char *to);
 int fused_utimens(const char *path, const struct timespec tv[2]);
+int fused_unlink(const char *path);
 
 /* Global state */
 extern fused_state_t *g_state;

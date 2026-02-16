@@ -591,6 +591,36 @@ int fused_rename(const char *from, const char *to)
     return 0;
 }
 
+/**
+ * @brief Called to remove a file
+ */
+int fused_unlink(const char* path)
+{
+    fused_inode_t *inode = path_to_inode(path);
+    if (!inode)
+    {
+        return -ENOENT;
+    }
+    char parent_path[MAX_PATH];
+    char child_name[MAX_NAME];
+    split_path(path, parent_path, child_name);
+
+    fused_inode_t *parent = path_to_inode(parent_path);
+
+    if (!parent || !S_ISDIR(parent->mode))
+    {
+        return -ENOENT;
+    }
+
+    int rc = dir_rm_entry(parent, child_name, inode);
+    if (rc == 0){
+      free_inode(inode);
+    }
+
+
+    return rc;
+}
+
 void log_message(const char *fmt, ...)
 {
     va_list args;
