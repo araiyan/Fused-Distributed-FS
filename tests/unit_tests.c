@@ -329,6 +329,299 @@ void test_open_updates_atime(void)
 }
 
 // ============================================================================
+// fused_read Tests
+// ============================================================================
+
+void test_read_basic_file(void)
+{
+    // Create a file with known content
+    fused_inode_t *file = create_test_file("readtest.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    
+    const char *test_data = "Hello, FUSED filesystem!";
+    FILE *fp = fopen(file->backing_path, "wb");
+    CU_ASSERT_PTR_NOT_NULL(fp);
+    fwrite(test_data, 1, strlen(test_data), fp);
+    fclose(fp);
+    file->size = strlen(test_data);
+    
+    // Open the file
+    struct fuse_file_info fi = {0};
+    fi.flags = O_RDONLY;
+    int result = fused_open("/readtest.txt", &fi);
+    CU_ASSERT_EQUAL(result, 0);
+    
+    // Read the file
+    char buf[256] = {0};
+    int bytes_read = fused_read("/readtest.txt", buf, sizeof(buf), 0, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_read, strlen(test_data));
+    CU_ASSERT_STRING_EQUAL(buf, test_data);
+}
+
+void test_read_with_offset(void)
+{
+    fused_inode_t *file = create_test_file("offsettest.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    
+    const char *test_data = "0123456789ABCDEFGHIJ";
+    FILE *fp = fopen(file->backing_path, "wb");
+    fwrite(test_data, 1, strlen(test_data), fp);
+    fclose(fp);
+    file->size = strlen(test_data);
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_RDONLY;
+    fused_open("/offsettest.txt", &fi);
+    
+    // Read from offset 10
+    char buf[256] = {0};
+    int bytes_read = fused_read("/offsettest.txt", buf, 10, 10, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_read, 10);
+    CU_ASSERT_STRING_EQUAL(buf, "ABCDEFGHIJ");
+}
+
+void test_read_beyond_file_size(void)
+{
+    fused_inode_t *file = create_test_file("smallfile.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    
+    const char *test_data = "small";
+    FILE *fp = fopen(file->backing_path, "wb");
+    fwrite(test_data, 1, strlen(test_data), fp);
+    fclose(fp);
+    file->size = strlen(test_data);
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_RDONLY;
+    fused_open("/smallfile.txt", &fi);
+    
+    // Try to read beyond file size
+    char buf[256] = {0};
+    int bytes_read = fused_read("/smallfile.txt", buf, 100, file->size, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_read, 0);  // Should return 0 for EOF
+}
+
+void test_read_partial_data(void)
+{
+    fused_inode_t *file = create_test_file("partial.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    
+    const char *test_data = "This is a longer file for partial reading";
+    FILE *fp = fopen(file->backing_path, "wb");
+    fwrite(test_data, 1, strlen(test_data), fp);
+    fclose(fp);
+    file->size = strlen(test_data);
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_RDONLY;
+    fused_open("/partial.txt", &fi);
+    
+    // Read only 10 bytes
+    char buf[256] = {0};
+    int bytes_read = fused_read("/partial.txt", buf, 10, 0, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_read, 10);
+    CU_ASSERT_NSTRING_EQUAL(buf, "This is a ", 10);
+}
+
+void test_read_empty_file(void)
+{
+    fused_inode_t *file = create_test_file("empty.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_RDONLY;
+    fused_open("/empty.txt", &fi);
+    
+    char buf[256] = {0};
+    int bytes_read = fused_read("/empty.txt", buf, sizeof(buf), 0, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_read, 0);
+}
+
+// ============================================================================
+// fused_write Tests
+// ============================================================================
+
+void test_write_basic_append(void)
+{
+    fused_inode_t *file = create_test_file("writetest.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY | O_APPEND;
+    int result = fused_open("/writetest.txt", &fi);
+    CU_ASSERT_EQUAL(result, 0);
+    
+    const char *test_data = "Hello, World!";
+    int bytes_written = fused_write("/writetest.txt", test_data, 
+                                     strlen(test_data), 0, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_written, strlen(test_data));
+    CU_ASSERT_EQUAL(file->size, strlen(test_data));
+}
+
+void test_write_multiple_appends(void)
+{
+    fused_inode_t *file = create_test_file("multiwrite.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY | O_APPEND;
+    fused_open("/multiwrite.txt", &fi);
+    
+    // First write
+    const char *data1 = "First line\n";
+    int bytes1 = fused_write("/multiwrite.txt", data1, strlen(data1), 0, &fi);
+    CU_ASSERT_EQUAL(bytes1, strlen(data1));
+    
+    // Second write
+    const char *data2 = "Second line\n";
+    int bytes2 = fused_write("/multiwrite.txt", data2, strlen(data2), 
+                             file->size, &fi);
+    CU_ASSERT_EQUAL(bytes2, strlen(data2));
+    
+    // Check total size
+    CU_ASSERT_EQUAL(file->size, strlen(data1) + strlen(data2));
+}
+
+void test_write_reject_non_append(void)
+{
+    fused_inode_t *file = create_test_file("protected_write.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    
+    // Write some initial data
+    const char *initial = "Initial content";
+    FILE *fp = fopen(file->backing_path, "wb");
+    fwrite(initial, 1, strlen(initial), fp);
+    fclose(fp);
+    file->size = strlen(initial);
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY | O_APPEND;
+    fused_open("/protected_write.txt", &fi);
+    
+    // Try to write at offset 0 (should be rejected)
+    const char *overwrite = "OVERWRITE";
+    int result = fused_write("/protected_write.txt", overwrite, 
+                             strlen(overwrite), 0, &fi);
+    
+    CU_ASSERT_EQUAL(result, -EPERM);
+    CU_ASSERT_EQUAL(file->size, strlen(initial));  // Size unchanged
+}
+
+void test_write_updates_metadata(void)
+{
+    fused_inode_t *file = create_test_file("metadata.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    time_t old_mtime = file->mtime;
+    time_t old_ctime = file->ctime;
+    
+    sleep(1);  // Ensure time difference
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY | O_APPEND;
+    fused_open("/metadata.txt", &fi);
+    
+    const char *data = "Test data";
+    fused_write("/metadata.txt", data, strlen(data), 0, &fi);
+    
+    CU_ASSERT_TRUE(file->mtime > old_mtime);
+    CU_ASSERT_TRUE(file->ctime > old_ctime);
+}
+
+void test_write_and_read_consistency(void)
+{
+    fused_inode_t *file = create_test_file("readwrite.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    // Write data
+    struct fuse_file_info fi_write = {0};
+    fi_write.flags = O_WRONLY | O_APPEND;
+    fused_open("/readwrite.txt", &fi_write);
+    
+    const char *test_data = "Data consistency test!";
+    int bytes_written = fused_write("/readwrite.txt", test_data, 
+                                     strlen(test_data), 0, &fi_write);
+    CU_ASSERT_EQUAL(bytes_written, strlen(test_data));
+    
+    // Read back the data
+    struct fuse_file_info fi_read = {0};
+    fi_read.flags = O_RDONLY;
+    fused_open("/readwrite.txt", &fi_read);
+    
+    char buf[256] = {0};
+    int bytes_read = fused_read("/readwrite.txt", buf, sizeof(buf), 0, &fi_read);
+    
+    CU_ASSERT_EQUAL(bytes_read, strlen(test_data));
+    CU_ASSERT_STRING_EQUAL(buf, test_data);
+}
+
+void test_write_large_data(void)
+{
+    fused_inode_t *file = create_test_file("largefile.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY | O_APPEND;
+    fused_open("/largefile.txt", &fi);
+    
+    // Write 10KB of data
+    const size_t data_size = 10240;
+    char *large_data = malloc(data_size);
+    memset(large_data, 'A', data_size);
+    
+    int bytes_written = fused_write("/largefile.txt", large_data, 
+                                     data_size, 0, &fi);
+    
+    CU_ASSERT_EQUAL(bytes_written, data_size);
+    CU_ASSERT_EQUAL(file->size, data_size);
+    
+    free(large_data);
+}
+
+void test_read_after_multiple_writes(void)
+{
+    fused_inode_t *file = create_test_file("sequential.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+    file->size = 0;
+    
+    struct fuse_file_info fi_write = {0};
+    fi_write.flags = O_WRONLY | O_APPEND;
+    fused_open("/sequential.txt", &fi_write);
+    
+    // Write multiple chunks
+    const char *chunk1 = "Line1\n";
+    const char *chunk2 = "Line2\n";
+    const char *chunk3 = "Line3\n";
+    
+    fused_write("/sequential.txt", chunk1, strlen(chunk1), 0, &fi_write);
+    fused_write("/sequential.txt", chunk2, strlen(chunk2), file->size, &fi_write);
+    fused_write("/sequential.txt", chunk3, strlen(chunk3), file->size, &fi_write);
+    
+    // Read all data
+    struct fuse_file_info fi_read = {0};
+    fi_read.flags = O_RDONLY;
+    fused_open("/sequential.txt", &fi_read);
+    
+    char buf[256] = {0};
+    int bytes_read = fused_read("/sequential.txt", buf, sizeof(buf), 0, &fi_read);
+    
+    CU_ASSERT_EQUAL(bytes_read, strlen(chunk1) + strlen(chunk2) + strlen(chunk3));
+    CU_ASSERT_STRING_EQUAL(buf, "Line1\nLine2\nLine3\n");
+}
+
+// ============================================================================
 // Main Test Runner
 // ============================================================================
 
@@ -337,6 +630,8 @@ int main()
     CU_pSuite suite_getattr = NULL;
     CU_pSuite suite_readdir = NULL;
     CU_pSuite suite_open = NULL;
+    CU_pSuite suite_read = NULL;
+    CU_pSuite suite_write = NULL;
     
     // Initialize CUnit
     if (CUE_SUCCESS != CU_initialize_registry())
@@ -348,8 +643,10 @@ int main()
     suite_getattr = CU_add_suite("fused_getattr Tests", init_suite, clean_suite);
     suite_readdir = CU_add_suite("fused_readdir Tests", init_suite, clean_suite);
     suite_open = CU_add_suite("fused_open Tests", init_suite, clean_suite);
+    suite_read = CU_add_suite("fused_read Tests", init_suite, clean_suite);
+    suite_write = CU_add_suite("fused_write Tests", init_suite, clean_suite);
     
-    if (!suite_getattr || !suite_readdir || !suite_open)
+    if (!suite_getattr || !suite_readdir || !suite_open || !suite_read || !suite_write)
     {
         CU_cleanup_registry();
         return CU_get_error();
@@ -376,6 +673,22 @@ int main()
     CU_add_test(suite_open, "Nonexistent file", test_open_nonexistent_file);
     CU_add_test(suite_open, "Directory as file", test_open_directory_as_file);
     CU_add_test(suite_open, "Updates atime", test_open_updates_atime);
+    
+    // Add read tests
+    CU_add_test(suite_read, "Basic file read", test_read_basic_file);
+    CU_add_test(suite_read, "Read with offset", test_read_with_offset);
+    CU_add_test(suite_read, "Read beyond file size", test_read_beyond_file_size);
+    CU_add_test(suite_read, "Read partial data", test_read_partial_data);
+    CU_add_test(suite_read, "Read empty file", test_read_empty_file);
+    
+    // Add write tests
+    CU_add_test(suite_write, "Basic append write", test_write_basic_append);
+    CU_add_test(suite_write, "Multiple appends", test_write_multiple_appends);
+    CU_add_test(suite_write, "Reject non-append", test_write_reject_non_append);
+    CU_add_test(suite_write, "Updates metadata", test_write_updates_metadata);
+    CU_add_test(suite_write, "Write and read consistency", test_write_and_read_consistency);
+    CU_add_test(suite_write, "Write large data", test_write_large_data);
+    CU_add_test(suite_write, "Read after multiple writes", test_read_after_multiple_writes);
     
     // Run tests
     CU_basic_set_mode(CU_BRM_VERBOSE);

@@ -18,6 +18,7 @@ WORKDIR /app
 
 COPY include/ /app/include/
 COPY src/ /app/src/
+COPY tests/ /app/tests/
 COPY Makefile /app/
 COPY scripts/ /app/scripts/
 
