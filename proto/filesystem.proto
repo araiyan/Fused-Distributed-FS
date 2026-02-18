@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package fused;
+
+service FileSystemService {
+  rpc Create(CreateRequest) returns (CreateResponse);
+  rpc Mkdir(MkdirRequest) returns (MkdirResponse);
+  rpc Write(WriteRequest) returns (WriteResponse);
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
+  
+  // Blocked - not implementing yet
+  // rpc Stats(StatsRequest) returns (StatsResponse);
+}
+
+// Create - Create a new file (like touch)
+message CreateRequest {
+  string pathname = 1;      // Directory path
+  string filename = 2;      // File name
+  uint32 mode = 3;          // File permissions (e.g., 0644)
+}
+
+message CreateResponse {
+  int32 status_code = 1;
+  string error_message = 2;
+}
+
+// Mkdir - Create a directory
+message MkdirRequest {
+  string pathname = 1;      // Parent directory path
+  string dirname = 2;       // New directory name
+  uint32 mode = 3;          // Directory permissions (e.g., 0755)
+}
+
+message MkdirResponse {
+  int32 status_code = 1;
+  string error_message = 2;
+}
+
+// Write - Append data to file
+message WriteRequest {
+  string pathname = 1;      // Full path to file (e.g., "/videos/short1.mp4")
+  bytes data = 2;           // Data to append
+  int64 offset = 3;         // Write offset (for append-only, should be EOF)
+}
+
+message WriteResponse {
+  int64 bytes_written = 1;  // Number of bytes written
+  int32 status_code = 2;    // 0 = success, negative = error (errno)
+  string error_message = 3; // Human-readable error (if any)
+}
+
+// Get - Read file contents (like cat)
+message GetRequest {
+  string pathname = 1;      // Full path to file
+  int64 offset = 2;         // Optional: read from offset (default 0)
+  int64 size = 3;           // Optional: bytes to read (0 = entire file)
+}
+
+message GetResponse {
+  bytes data = 1;           // File contents
+  int64 bytes_read = 2;     // Actual bytes read
+  int32 status_code = 3;    // 0 = success, negative = error
+  string error_message = 4;
+}
+
+// ReadDirectory - List directory contents (like ls)
+message ReadDirectoryRequest {
+  string pathname = 1;      // Path to directory (e.g., "/videos")
+}
+
+message FileEntry {
+  string name = 1;          // Entry name
+  bool is_directory = 2;    // true = directory, false = file
+  int64 size = 3;           // File size in bytes
+  int64 mtime = 4;          // Modification time (unix timestamp)
+}
+
+message ReadDirectoryResponse {
+  repeated FileEntry entries = 1;  // Directory contents
+  int32 status_code = 2;           // 0 = success, negative = error
+  string error_message = 3;
+}

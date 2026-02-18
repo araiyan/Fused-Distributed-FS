@@ -40,3 +40,7 @@ core.*
 # Mount points
 mnt/
 mount/
+
+# Protobuf generated files
+proto/*.pb.h
+proto/*.pb.cc

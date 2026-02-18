@@ -89,4 +89,8 @@ extern fused_state_t *g_state;
 /* Helper function for logging */
 void log_message(const char *fmt, ...);
 
+/* Helper functions for RPC server */
+fused_inode_t* path_to_inode(const char *path);
+fused_inode_t* lookup_inode(uint64_t ino);
+
 #endif /* FUSED_FS_H */

@@ -7,16 +7,20 @@ A FUSE-based filesystem implementation written in C with Docker support for easy
 ```
 Fused-FS/
 ├── include/
-│   └── fused_fs.h          # Main header file
+│   └── fused_fs.h             # Main header file
+├── proto/
+│   └── filesystem.proto       # gRPC service definitions
 ├── src/
-│   ├── fused_main.c        # Entry point and initialization
-│   └── fused_ops.c         # FUSE operations implementation
+│   ├── fused_main.c           # Entry point and initialization
+│   └── fused_ops.c            # FUSE operations implementation
+│   └── fused_rpc_server.cpp   # Network RPC server for distributed filesystem     
 ├── scripts/
-│   └── build_docker.sh     # Docker build helper
+│   └── build_docker.sh        # Docker build helper
 ├── tests/
-│   ├── unit_tests.c        # CUnit test suite
-│   └── functional_test.sh  # Functional test script
-└── Makefile                # Build configuration
+│   ├── unit_tests.c           # CUnit test suite
+│   ├── simple_bash_test.c     # 
+│   └── functional_test.sh     # Functional test script
+└── Makefile                   # Build configuration
 ```
 ## Requirements
 

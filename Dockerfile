@@ -12,12 +12,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     libcunit1 \
     libcunit1-dev \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler \
+    protobuf-compiler-grpc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY include/ /app/include/
 COPY src/ /app/src/
+COPY proto/ /app/proto/
 COPY tests/ /app/tests/
 COPY Makefile /app/
 COPY scripts/ /app/scripts/

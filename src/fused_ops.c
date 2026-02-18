@@ -19,9 +19,9 @@ static fused_inode_t *alloc_inode(void);
 static void free_inode(fused_inode_t *inode);
 static int dir_add_entry(fused_inode_t *dir, const char *name, fused_inode_t *child);
 static int dir_rm_entry(fused_inode_t *dir, const char *name, fused_inode_t *child);
-static fused_inode_t *lookup_inode(uint64_t ino);
+fused_inode_t *lookup_inode(uint64_t ino);
 static void generate_backing_path(fused_inode_t *inode, uint64_t ino);
-static fused_inode_t *path_to_inode(const char *path);
+fused_inode_t *path_to_inode(const char *path);
 
 /* Global state pointer */
 fused_state_t *g_state = NULL;
@@ -617,7 +617,7 @@ void log_message(const char *fmt, ...)
 /**
  * @brief Find inode by inode number
  */
-static fused_inode_t *lookup_inode(uint64_t ino)
+fused_inode_t *lookup_inode(uint64_t ino)
 {
     for (int i = 0; i < g_state->n_inodes; i++)
     {
@@ -641,7 +641,7 @@ static void generate_backing_path(fused_inode_t *inode, uint64_t ino)
 /**
  * @brief Resolve path to inode
  */
-static fused_inode_t *path_to_inode(const char *path)
+fused_inode_t *path_to_inode(const char *path)
 {
     if (strcmp(path, "/") == 0)
     {
