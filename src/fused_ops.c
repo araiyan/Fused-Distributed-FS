@@ -539,6 +539,9 @@ int fused_rmdir(const char *path)
  */
 int fused_rename(const char *from, const char *to)
 {
+    if (strcmp(from, to) == 0){
+    return 0;
+  }
     fused_inode_t *inode = path_to_inode(from);
     if (!inode)
     {
@@ -549,28 +552,33 @@ int fused_rename(const char *from, const char *to)
     {
         return -EEXIST;
     }
-    char parent_path[MAX_PATH];
-    char child_name[MAX_NAME];
-    split_path(from, parent_path, child_name);
 
-    fused_inode_t *parent = path_to_inode(parent_path);
-    int rc = dir_rm_entry(parent, child_name, inode);
+
+    char src_path[MAX_PATH];
+    char dest_path[MAX_PATH];
+    char src_name[MAX_NAME];
+    char dest_name[MAX_NAME];
+
+
+    split_path(from, src_path, src_name);
+    split_path(to, dest_path, dest_name);
+    fused_inode_t *src_parent = path_to_inode(src_path);
+    fused_inode_t *dest_parent = path_to_inode(dest_path);
+
+    int rc = dir_add_entry(dest_parent, dest_name, inode);
     if (rc != 0)
     {
         return rc;
     }
-
+    rc = dir_rm_entry(src_parent, src_name, inode);
+    if (rc != 0)
+    {
+        dir_rm_entry(dest_parent, dest_name, inode);
+        return rc;
+    }
     // accessed, and modified now
     inode->atime = time(NULL);
     inode->mtime = inode->atime;
-
-    split_path(to, parent_path, child_name);
-    parent = path_to_inode(parent_path);
-    rc = dir_add_entry(parent, child_name, inode);
-    if (rc != 0)
-    {
-        return rc;
-    }
     return 0;
 }
 

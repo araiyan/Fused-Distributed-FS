@@ -772,7 +772,168 @@ void test_rmdir_not_directory(void)
     CU_ASSERT_EQUAL(result, -ENOTDIR);
 }
 
-// ============================================================================
+
+// touch
+// dependent on fused_read
+void test_create_successful(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+    const char* path = "/file1834.txt";
+    int result = fused_create(path, 0755, &fi);
+    CU_ASSERT_EQUAL(result, 0);
+
+    char buf[10];
+    result = fused_read(path, buf, 3, 0, &fi);
+    
+    // should not be able to read anything from the stream
+    CU_ASSERT_EQUAL(result, 0);
+}
+
+void test_create_file_exists(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+  const char* path = "/file_create_2.txt";
+    int result = fused_create(path, 0755, &fi);
+    CU_ASSERT_EQUAL(result, 0);
+    result = fused_create(path, 0755, &fi);
+    CU_ASSERT_NOT_EQUAL(result, 0);
+
+}
+// create should error when the parent directory doesn't exist
+void test_create_parent_dne(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+  const char* path = "create_test/file.txt";
+    int result = fused_create(path, 0755, &fi);
+    CU_ASSERT_NOT_EQUAL(result, 0);
+}
+
+
+// rename
+// dependent on fused_create and fused_write and fused_read
+void test_rename_successful(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+  const char* path = "/file3.txt";
+    int result = fused_create(path, 0755, &fi);
+  const char* write_buf = "this will be written to a file";
+  int write_buf_len = strlen(write_buf);
+    
+  fused_write(path, write_buf, write_buf_len, 0, &fi);
+  const char* newpath= "/renametestfile.txt" ;
+    result = fused_rename(path, newpath);
+    CU_ASSERT_EQUAL(result, 0);
+    
+    fused_inode_t* inode = path_to_inode(path);
+    CU_ASSERT_PTR_NULL(inode);
+
+    inode = path_to_inode(newpath);
+    CU_ASSERT_PTR_NOT_NULL(inode);
+    char buf[write_buf_len+1];
+    result = fused_read(newpath, buf, write_buf_len, 0, &fi);
+    buf[write_buf_len] = '\0';
+    CU_ASSERT_STRING_EQUAL(write_buf, buf);
+}
+// if dest does not exist, should throw an error
+void test_rename_invalid_source(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+  const char* path = "/file4.txt";
+
+  const char* write_buf = "this will be written to a file";
+  int write_buf_len = strlen(write_buf);
+  fused_write(path, write_buf, write_buf_len, 0, &fi);
+
+  const char* newpath= "/renametestfile2.txt";
+
+    int result = fused_rename(path, newpath);
+    CU_ASSERT_NOT_EQUAL(result, 0);
+
+    fused_inode_t* inode = path_to_inode(path);
+    CU_ASSERT_PTR_NULL(inode);
+
+    inode = path_to_inode(newpath);
+    CU_ASSERT_PTR_NULL(inode);
+}
+
+// if parent directory of destination path does not exist, should throw an error
+void test_rename_invalid_dest(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+  const char* path = "/file5.txt";
+
+    int result = fused_create(path, 0755, &fi);
+  const char* write_buf = "this will be written to a file";
+  int write_buf_len = strlen(write_buf);
+  fused_write(path, write_buf, write_buf_len, 0, &fi);
+  const char* newpath= "/nonexistent_dir/renametestfile.txt" ;
+    result = fused_rename(path, newpath);
+    CU_ASSERT_NOT_EQUAL(result, 0);
+
+  // make sure original file wasn't deleted
+    fused_inode_t* inode = path_to_inode(newpath);
+    CU_ASSERT_PTR_NULL(inode);
+    inode = path_to_inode("/nonexistent_dir");
+    CU_ASSERT_PTR_NULL(inode);
+    inode = path_to_inode(path);
+    CU_ASSERT_PTR_NOT_NULL(inode);
+
+    char buf[write_buf_len+1];
+    result = fused_read(path, buf, write_buf_len, 0, &fi);
+    buf[write_buf_len] = '\0';
+    CU_ASSERT_STRING_EQUAL(write_buf, buf);
+}
+
+
+// rename a file to itself
+void test_rename_same_source_as_dest(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+  const char* path = "/file6.txt";
+    int result = fused_create(path, 0755, &fi);
+
+  const char* write_buf = "this will be written to a file";
+  int write_buf_len = strlen(write_buf);
+  fused_write(path, write_buf, write_buf_len, 0, &fi);
+    result = fused_rename(path, path);
+    CU_ASSERT_EQUAL(result, 0);
+
+  // make sure file wasn't deleted
+    fused_inode_t* inode = path_to_inode(path);
+    CU_ASSERT_PTR_NOT_NULL(inode);
+
+    char buf[write_buf_len+1];
+    result = fused_read(path, buf, write_buf_len, 0, &fi);
+    buf[write_buf_len] = '\0';
+    CU_ASSERT_STRING_EQUAL(write_buf, buf);
+}
+
+// remove a file
+// relies on create:
+void test_remove_successful(void)
+{
+    struct fuse_file_info fi = {0};
+    fi.flags = O_WRONLY;
+
+  const char* path = "/remove.txt";
+    int result = fused_create(path, 0755, &fi);
+
+    result = fused_unlink(path);
+    CU_ASSERT_EQUAL(result, 0);
+    // make sure file wasn't deleted
+    fused_inode_t* inode = path_to_inode(path);
+    CU_ASSERT_PTR_NULL(inode);
+
+    result = fused_unlink(path);
+    CU_ASSERT_NOT_EQUAL(result, 0);
+}
 // Main Test Runner
 // ============================================================================
 
@@ -785,6 +946,9 @@ int main()
     CU_pSuite suite_write = NULL;
     CU_pSuite suite_mkdir = NULL;
     CU_pSuite suite_rmdir = NULL;
+    CU_pSuite suite_create = NULL;
+    CU_pSuite suite_rename = NULL;
+    CU_pSuite suite_unlink = NULL;
     
     // Initialize CUnit
     if (CUE_SUCCESS != CU_initialize_registry())
@@ -800,6 +964,9 @@ int main()
     suite_write = CU_add_suite("fused_write Tests", init_suite, clean_suite);
     suite_mkdir = CU_add_suite("fused_mkdir Tests", init_suite, clean_suite);
     suite_rmdir = CU_add_suite("fused_rmdir Tests", init_suite, clean_suite);
+    suite_create = CU_add_suite("fused_create Tests", init_suite, clean_suite);
+    suite_rename = CU_add_suite("fused_rename Tests", init_suite, clean_suite);
+    suite_unlink = CU_add_suite("fused_unlink Tests", init_suite, clean_suite);
 
     
     if (!suite_getattr || !suite_readdir || !suite_open || !suite_read || !suite_write || !suite_mkdir || !suite_rmdir)
@@ -858,6 +1025,18 @@ int main()
     CU_add_test(suite_rmdir, "Remove nonexistent directory", test_rmdir_nonexistent);
     CU_add_test(suite_rmdir, "Remove root (busy)", test_rmdir_root_busy);
     CU_add_test(suite_rmdir, "Remove not a directory", test_rmdir_not_directory);
+
+    // add create tests
+    CU_add_test(suite_create, "Successful create", test_create_successful);
+    CU_add_test(suite_create, "Create to invalid path", test_create_parent_dne);
+    CU_add_test(suite_create, "Create existing path", test_create_file_exists);
+
+    CU_add_test(suite_rename, "Working rename", test_rename_successful);
+    CU_add_test(suite_rename, "Rename to an invalid path", test_rename_invalid_dest);
+    CU_add_test(suite_rename, "Rename a file that does not exist", test_rename_invalid_source);
+    CU_add_test(suite_rename, "Rename a file to itself", test_rename_same_source_as_dest);
+
+    CU_add_test(suite_unlink, "Remove a file, and a nonexistant file", test_remove_successful);
     
     // Run tests
     CU_basic_set_mode(CU_BRM_VERBOSE);
