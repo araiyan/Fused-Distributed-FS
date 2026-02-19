@@ -622,6 +622,157 @@ void test_read_after_multiple_writes(void)
 }
 
 // ============================================================================
+// fused_mkdir Tests
+// ============================================================================
+
+void test_mkdir_success(void)
+{
+    int result = fused_mkdir("/newdir", 0755);
+    CU_ASSERT_EQUAL(result, 0);
+
+    struct stat stbuf;
+    result = fused_getattr("/newdir", &stbuf);
+    CU_ASSERT_EQUAL(result, 0);
+    CU_ASSERT_TRUE(S_ISDIR(stbuf.st_mode));
+
+    readdir_capture_t capture = {0};
+    int rc = fused_readdir("/", &capture, test_filler, 0, NULL);
+    CU_ASSERT_EQUAL(rc, 0);
+
+    int found = 0;
+    for (int i = 0; i < capture.count; i++)
+    {
+        if (strcmp(capture.names[i], "newdir") == 0)
+        {
+            found = 1;
+            break;
+        }
+    }
+    CU_ASSERT_TRUE(found);
+}
+
+void test_mkdir_existing(void)
+{
+    int result = fused_mkdir("/existsdir", 0755);
+    CU_ASSERT_EQUAL(result, 0);
+
+    result = fused_mkdir("/existsdir", 0755);
+    CU_ASSERT_EQUAL(result, -EEXIST);
+}
+
+void test_mkdir_parent_nonexistent(void)
+{
+    int result = fused_mkdir("/no_parent/child", 0755);
+    CU_ASSERT_EQUAL(result, -ENOENT);
+}
+
+void test_mkdir_parent_not_directory(void)
+{
+    fused_inode_t *file = create_test_file("notdir", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+
+    int result = fused_mkdir("/notdir/child", 0755);
+    CU_ASSERT_EQUAL(result, -ENOENT);
+}
+
+// ============================================================================
+// fused_rmdir Tests
+// ============================================================================
+
+void test_rmdir_success(void)
+{
+    int result = fused_mkdir("/toremove", 0755);
+    CU_ASSERT_EQUAL(result, 0);
+
+    result = fused_rmdir("/toremove");
+    CU_ASSERT_EQUAL(result, 0);
+
+    struct stat stbuf;
+    result = fused_getattr("/toremove", &stbuf);
+    CU_ASSERT_EQUAL(result, -ENOENT);
+
+    readdir_capture_t capture = {0};
+    int rc = fused_readdir("/", &capture, test_filler, 0, NULL);
+    CU_ASSERT_EQUAL(rc, 0);
+
+    int found = 0;
+    for (int i = 0; i < capture.count; i++)
+    {
+        if (strcmp(capture.names[i], "toremove") == 0)
+        {
+            found = 1;
+            break;
+        }
+    }
+    CU_ASSERT_FALSE(found);
+}
+
+void test_rmdir_nonempty(void)
+{
+    int result = fused_mkdir("/parent", 0755);
+    CU_ASSERT_EQUAL(result, 0);
+
+    fused_inode_t *parent = path_to_inode("/parent");
+    CU_ASSERT_PTR_NOT_NULL(parent);
+
+    // Create a child file and move it under /parent
+    fused_inode_t *child = create_test_file("child.txt", "/");
+    CU_ASSERT_PTR_NOT_NULL(child);
+
+    // Remove child from root's entries
+    fused_inode_t *root = &g_state->inodes[0];
+    int idx = -1;
+    for (int i = 0; i < root->n_children; i++)
+    {
+        if (root->child_inodes[i] == child->ino)
+        {
+            idx = i;
+            break;
+        }
+    }
+    if (idx != -1)
+    {
+        for (int j = idx; j < root->n_children - 1; j++)
+        {
+            strncpy(root->child_names[j], root->child_names[j + 1], MAX_NAME);
+            root->child_inodes[j] = root->child_inodes[j + 1];
+        }
+        root->n_children--;
+    }
+
+    // Add child to parent
+    strncpy(parent->child_names[parent->n_children], "child.txt", MAX_NAME - 1);
+    parent->child_names[parent->n_children][MAX_NAME - 1] = '\0';
+    parent->child_inodes[parent->n_children] = child->ino;
+    parent->n_children++;
+
+    // Now attempt to remove non-empty directory
+    result = fused_rmdir("/parent");
+    CU_ASSERT_EQUAL(result, -ENOTEMPTY);
+}
+
+void test_rmdir_nonexistent(void)
+{
+    int result = fused_rmdir("/doesnotexist");
+    CU_ASSERT_EQUAL(result, -ENOENT);
+}
+
+void test_rmdir_root_busy(void)
+{
+    int result = fused_rmdir("/");
+    CU_ASSERT_EQUAL(result, -EBUSY);
+}
+
+void test_rmdir_not_directory(void)
+{
+    fused_inode_t *file = create_test_file("notdir2", "/");
+    CU_ASSERT_PTR_NOT_NULL(file);
+
+    int result = fused_rmdir("/notdir2");
+    CU_ASSERT_EQUAL(result, -ENOTDIR);
+}
+
+// ============================================================================
 // Main Test Runner
 // ============================================================================
 
@@ -632,6 +783,8 @@ int main()
     CU_pSuite suite_open = NULL;
     CU_pSuite suite_read = NULL;
     CU_pSuite suite_write = NULL;
+    CU_pSuite suite_mkdir = NULL;
+    CU_pSuite suite_rmdir = NULL;
     
     // Initialize CUnit
     if (CUE_SUCCESS != CU_initialize_registry())
@@ -645,8 +798,11 @@ int main()
     suite_open = CU_add_suite("fused_open Tests", init_suite, clean_suite);
     suite_read = CU_add_suite("fused_read Tests", init_suite, clean_suite);
     suite_write = CU_add_suite("fused_write Tests", init_suite, clean_suite);
+    suite_mkdir = CU_add_suite("fused_mkdir Tests", init_suite, clean_suite);
+    suite_rmdir = CU_add_suite("fused_rmdir Tests", init_suite, clean_suite);
+
     
-    if (!suite_getattr || !suite_readdir || !suite_open || !suite_read || !suite_write)
+    if (!suite_getattr || !suite_readdir || !suite_open || !suite_read || !suite_write || !suite_mkdir || !suite_rmdir)
     {
         CU_cleanup_registry();
         return CU_get_error();
@@ -689,6 +845,19 @@ int main()
     CU_add_test(suite_write, "Write and read consistency", test_write_and_read_consistency);
     CU_add_test(suite_write, "Write large data", test_write_large_data);
     CU_add_test(suite_write, "Read after multiple writes", test_read_after_multiple_writes);
+
+    // Add mkdir tests
+    CU_add_test(suite_mkdir, "Create directory (success)", test_mkdir_success);
+    CU_add_test(suite_mkdir, "Create directory (existing)", test_mkdir_existing);
+    CU_add_test(suite_mkdir, "Create directory (parent nonexistent)", test_mkdir_parent_nonexistent);
+    CU_add_test(suite_mkdir, "Create directory (parent not dir)", test_mkdir_parent_not_directory);
+    
+    // Add rmdir tests
+    CU_add_test(suite_rmdir, "Remove empty directory (success)", test_rmdir_success);
+    CU_add_test(suite_rmdir, "Remove non-empty directory", test_rmdir_nonempty);
+    CU_add_test(suite_rmdir, "Remove nonexistent directory", test_rmdir_nonexistent);
+    CU_add_test(suite_rmdir, "Remove root (busy)", test_rmdir_root_busy);
+    CU_add_test(suite_rmdir, "Remove not a directory", test_rmdir_not_directory);
     
     // Run tests
     CU_basic_set_mode(CU_BRM_VERBOSE);
