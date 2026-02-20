@@ -130,6 +130,15 @@ docker exec fused_fs bash -c "cd /app && make test-functional"
 docker exec fused_fs bash -c "cd /app && make test"
 ```
 
+## gRPC server
+We have included a gRPC server to accept requests from clients
+run the server on Docker with
+`./rebuild_docker_and_start_grpc.sh`
+
+Test with our grpc client.
+Instructions are at `proto/README.md`
+
+
 ## Acknowledgments
 
 Built using:

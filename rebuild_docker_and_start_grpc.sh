@@ -11,6 +11,8 @@ docker run -d \
   --privileged \
   --device /dev/fuse \
   --cap-add SYS_ADMIN \
+  -p 50051:50051 \
   fused-fs:latest
 
-docker exec -it fused_fs bash -c "cd /app && make test-unit"
+docker exec -it fused_fs bash -c "cd /app && rm -rf proto/*.pb.h && rm -rf proto/*.pb.cc && make rpc-server"
+docker exec -it fused_fs bash -c "cd /app && bin/fused_rpc_server"
