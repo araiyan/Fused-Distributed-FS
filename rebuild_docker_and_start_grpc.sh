@@ -15,4 +15,4 @@ docker run -d \
   fused-fs:latest
 
 docker exec -it fused_fs bash -c "cd /app && rm -rf proto/*.pb.h && rm -rf proto/*.pb.cc && make rpc-server"
-docker exec -it fused_fs bash -c "cd /app && bin/fused_rpc_server"
+docker exec -it fused_fs bash -c "cd /app && touch /mnt/fused/test.txt && bin/fused_rpc_server"
