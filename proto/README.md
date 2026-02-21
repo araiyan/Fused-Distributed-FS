@@ -26,4 +26,4 @@ Make grpc client
 
 5. Run client
 `./grpc_client`
-Notes: the client won't tell you if it can't access the grpc server. You should see either error messages or return data from readdirectory
+Notes: the client won't tell you if it can't access the grpc server. You should see either error messages or readdirectory return at least one file.
