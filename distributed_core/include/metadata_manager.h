@@ -90,3 +90,70 @@ typedef struct {
     uint64_t total_size;                         // Total size of all files
 } metadata_manager_t;
 
+/* Metadata Manager API Functions */
+
+/**
+ * Initialize metadata manager
+ * @param wal_path Path to Write-Ahead Log file
+ * @return Initialized metadata_manager_t or NULL on error
+ */
+metadata_manager_t *metadata_manager_init(const char *wal_path);
+
+/**
+ * Destroy and cleanup metadata manager
+ */
+void metadata_manager_destroy(metadata_manager_t *mgr);
+
+/**
+ * Create a new metadata entry
+ * @param mgr Metadata manager
+ * @param path File path
+ * @param mode File permissions
+ * @param uid Owner user ID
+ * @param gid Owner group ID
+ * @return New metadata entry or NULL on error
+ */
+metadata_entry_t *metadata_create_entry(metadata_manager_t *mgr, const char *path,
+                                        mode_t mode, uid_t uid, gid_t gid);
+
+/**
+ * Lookup metadata entry by file_id
+ * @param mgr Metadata manager
+ * @param file_id File identifier
+ * @return Metadata entry or NULL if not found (caller must release read lock)
+ */
+metadata_entry_t *metadata_lookup(metadata_manager_t *mgr, const char *file_id);
+
+/**
+ * Lookup metadata entry by path
+ * @param mgr Metadata manager
+ * @param path File path
+ * @return Metadata entry or NULL if not found (caller must release read lock)
+ */
+metadata_entry_t *metadata_lookup_by_path(metadata_manager_t *mgr, const char *path);
+
+/**
+ * Update metadata entry (writes to WAL first)
+ * @param mgr Metadata manager
+ * @param entry Updated metadata entry
+ * @return 0 on success, -1 on error
+ */
+int metadata_update_entry(metadata_manager_t *mgr, metadata_entry_t *entry);
+
+/**
+ * Delete metadata entry (marks as deleted, writes to WAL)
+ * @param mgr Metadata manager
+ * @param file_id File identifier
+ * @return 0 on success, -1 on error
+ */
+int metadata_delete_entry(metadata_manager_t *mgr, const char *file_id);
+
+/**
+ * Assign storage nodes to a file
+ * @param mgr Metadata manager
+ * @param entry Metadata entry
+ * @param node_ips Array of storage node IP addresses
+ * @param node_ports Array of storage node ports
+ * @param num_nodes Number of storage nodes
+ * @return 0 on success, -1 on error
+ */
