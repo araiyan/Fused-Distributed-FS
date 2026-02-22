@@ -29,6 +29,19 @@ using fused::ReadDirectoryRequest;
 using fused::ReadDirectoryResponse;
 using fused::FileEntry;
 
+/**
+ * @brief Normalize path by removing /mnt/fused prefix if present
+ */
+std::string normalize_path(const std::string& path) {
+    const std::string mount_prefix = "/mnt/fused";
+    if (path.find(mount_prefix) == 0) {
+        std::string normalized = path.substr(mount_prefix.length());
+        // If path was just "/mnt/fused", return "/"
+        return normalized.empty() ? "/" : normalized;
+    }
+    return path;
+}
+
 class FileSystemServiceImpl final : public FileSystemService::Service {
 public:
 
@@ -39,7 +52,7 @@ public:
                  const WriteRequest* request,
                  WriteResponse* response) override {
         
-        const std::string& path = request->pathname();
+        std::string path = normalize_path(request->pathname());
         const std::string& data = request->data();
         off_t offset = request->offset();
         
@@ -121,7 +134,7 @@ public:
                const GetRequest* request,
                GetResponse* response) override {
         
-        const std::string& path = request->pathname();
+        std::string path = normalize_path(request->pathname());
         off_t offset = request->offset();
         size_t size = request->size();
         
@@ -199,7 +212,7 @@ public:
                          const ReadDirectoryRequest* request,
                          ReadDirectoryResponse* response) override {
         
-        const std::string& path = request->pathname();
+        std::string path = normalize_path(request->pathname());
         
         log_message("RPC ReadDirectory: path=%s", path.c_str());
         
