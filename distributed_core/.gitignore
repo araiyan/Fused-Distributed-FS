@@ -1,0 +1,25 @@
+# .gitignore for distributed_core
+
+# Object files
+*.o
+*.obj
+*.so
+*.a
+*.dylib
+*.dll
+*.exe
+# WAL files
+/tmp/metadata_wal_*.dat
+*.wal
+*.dat
+*.log
+
+# Editor files
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+*.sublime-*
+# Docker volumes
+.docker/
