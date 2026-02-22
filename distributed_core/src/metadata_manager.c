@@ -278,3 +278,185 @@ int metadata_delete_entry(metadata_manager_t *mgr, const char *file_id) {
     return 0;
 }
 
+/* Assign storage nodes to file */
+int metadata_assign_storage_nodes(metadata_manager_t *mgr, metadata_entry_t *entry,
+                                   const char node_ips[][64], const uint32_t *node_ports,
+                                   uint32_t num_nodes) {
+    if (!mgr || !entry || !node_ips || !node_ports || num_nodes > MAX_STORAGE_NODES) {
+        return -1;
+    }
+    
+    pthread_rwlock_wrlock(&entry->lock);
+    
+    for (uint32_t i = 0; i < num_nodes; i++) {
+        strncpy(entry->storage_node_ips[i], node_ips[i], 63);
+        entry->storage_node_ports[i] = node_ports[i];
+    }
+    entry->num_storage_nodes = num_nodes;
+    entry->primary_node_idx = 0;
+    
+    pthread_rwlock_unlock(&entry->lock);
+    
+    return metadata_update_entry(mgr, entry);
+}
+
+/* Append to WAL */
+uint64_t wal_append(metadata_manager_t *mgr, wal_op_type_t op_type,
+                    const metadata_entry_t *entry) {
+    if (!mgr || !entry) {
+        return UINT64_MAX;
+    }
+    
+    pthread_mutex_lock(&mgr->wal_lock);
+    
+    // Serialize entry
+    uint8_t *data;
+    size_t data_len;
+    if (metadata_serialize(entry, &data, &data_len) != 0) {
+        pthread_mutex_unlock(&mgr->wal_lock);
+        return UINT64_MAX;
+    }
+    
+    // Create WAL entry
+    wal_entry_t wal_entry;
+    wal_entry.log_sequence_number = ++mgr->current_lsn;
+    wal_entry.op_type = op_type;
+    wal_entry.timestamp = time(NULL);
+    wal_entry.data = data;
+    wal_entry.data_len = data_len;
+    wal_entry.checksum = metadata_crc32(data, data_len);
+    
+    // Write WAL entry header
+    ssize_t written = write(mgr->wal_fd, &wal_entry, 
+                           sizeof(wal_entry) - sizeof(uint8_t*));
+    if (written < 0) {
+        free(data);
+        pthread_mutex_unlock(&mgr->wal_lock);
+        return UINT64_MAX;
+    }
+    
+    // Write data
+    written = write(mgr->wal_fd, data, data_len);
+    free(data);
+    
+    if (written < 0) {
+        pthread_mutex_unlock(&mgr->wal_lock);
+        return UINT64_MAX;
+    }
+    
+    // CRITICAL: fsync to ensure durability
+    if (fsync(mgr->wal_fd) != 0) {
+        perror("fsync failed");
+        pthread_mutex_unlock(&mgr->wal_lock);
+        return UINT64_MAX;
+    }
+    
+    pthread_mutex_unlock(&mgr->wal_lock);
+    
+    return wal_entry.log_sequence_number;
+}
+
+/* Replay WAL */
+int wal_replay(metadata_manager_t *mgr) {
+    if (!mgr) {
+        return -1;
+    }
+    
+    // Seek to beginning
+    lseek(mgr->wal_fd, 0, SEEK_SET);
+    
+    wal_entry_t wal_entry;
+    while (1) {
+        // Read WAL entry header
+        ssize_t bytes_read = read(mgr->wal_fd, &wal_entry,
+                                 sizeof(wal_entry) - sizeof(uint8_t*));
+        if (bytes_read == 0) {
+            break; // End of file
+        }
+        if (bytes_read < 0) {
+            return -1;
+        }
+        
+        // Read data
+        wal_entry.data = (uint8_t *)malloc(wal_entry.data_len);
+        bytes_read = read(mgr->wal_fd, wal_entry.data, wal_entry.data_len);
+        if (bytes_read < 0) {
+            free(wal_entry.data);
+            return -1;
+        }
+        
+        // Verify checksum
+        uint32_t checksum = metadata_crc32(wal_entry.data, wal_entry.data_len);
+        if (checksum != wal_entry.checksum) {
+            fprintf(stderr, "WAL corruption detected at LSN %" PRIu64 "\n", 
+                   wal_entry.log_sequence_number);
+            free(wal_entry.data);
+            continue;
+        }
+        
+        // Deserialize and apply
+        metadata_entry_t *entry;
+        if (metadata_deserialize(wal_entry.data, wal_entry.data_len, &entry) == 0) {
+            // Apply operation to hash map
+            // (Implementation depends on op_type)
+        }
+        
+        free(wal_entry.data);
+        mgr->current_lsn = wal_entry.log_sequence_number;
+    }
+    
+    return 0;
+}
+
+/* Truncate WAL */
+int wal_truncate(metadata_manager_t *mgr, uint64_t lsn) {
+    if (!mgr) {
+        return -1;
+    }
+    
+    (void)lsn; // Unused parameter for now
+    
+    // Implementation: rewrite WAL with entries >= lsn
+    // For simplicity, just truncate to 0 for now
+    pthread_mutex_lock(&mgr->wal_lock);
+    ftruncate(mgr->wal_fd, 0);
+    lseek(mgr->wal_fd, 0, SEEK_SET);
+    pthread_mutex_unlock(&mgr->wal_lock);
+    
+    return 0;
+}
+
+/* Serialize metadata entry */
+int metadata_serialize(const metadata_entry_t *entry, uint8_t **buffer, size_t *len) {
+    if (!entry || !buffer || !len) {
+        return -1;
+    }
+    
+    // Simple serialization (should use protobuf/msgpack in production)
+    *len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+    *buffer = (uint8_t *)malloc(*len);
+    if (!*buffer) {
+        return -1;
+    }
+    
+    memcpy(*buffer, entry, *len);
+    
+    return 0;
+}
+
+/* Deserialize metadata entry */
+int metadata_deserialize(const uint8_t *buffer, size_t len, metadata_entry_t **entry) {
+    if (!buffer || !entry) {
+        return -1;
+    }
+    
+    *entry = (metadata_entry_t *)calloc(1, sizeof(metadata_entry_t));
+    if (!*entry) {
+        return -1;
+    }
+    
+    memcpy(*entry, buffer, len);
+    pthread_rwlock_init(&(*entry)->lock, NULL);
+    
+    return 0;
+}

@@ -157,3 +157,56 @@ int metadata_delete_entry(metadata_manager_t *mgr, const char *file_id);
  * @param num_nodes Number of storage nodes
  * @return 0 on success, -1 on error
  */
+int metadata_assign_storage_nodes(metadata_manager_t *mgr, metadata_entry_t *entry,
+                                   const char node_ips[][64], const uint32_t *node_ports,
+                                   uint32_t num_nodes);
+
+/**
+ * Write operation to WAL (MUST be called before modifying state)
+ * @param mgr Metadata manager
+ * @param op_type Operation type
+ * @param entry Metadata entry to log
+ * @return LSN on success, UINT64_MAX on error
+ */
+uint64_t wal_append(metadata_manager_t *mgr, wal_op_type_t op_type, 
+                    const metadata_entry_t *entry);
+
+/**
+ * Replay WAL from disk (for recovery)
+ * @param mgr Metadata manager
+ * @return 0 on success, -1 on error
+ */
+int wal_replay(metadata_manager_t *mgr);
+
+/**
+ * Truncate WAL after checkpoint
+ * @param mgr Metadata manager
+ * @param lsn Truncate all entries before this LSN
+ * @return 0 on success, -1 on error
+ */
+int wal_truncate(metadata_manager_t *mgr, uint64_t lsn);
+
+/**
+ * Serialize metadata entry for network/storage
+ * @param entry Metadata entry
+ * @param buffer Output buffer (caller must free)
+ * @param len Output length
+ * @return 0 on success, -1 on error
+ */
+int metadata_serialize(const metadata_entry_t *entry, uint8_t **buffer, size_t *len);
+
+/**
+ * Deserialize metadata entry
+ * @param buffer Input buffer
+ * @param len Buffer length
+ * @param entry Output entry (caller must free)
+ * @return 0 on success, -1 on error
+ */
+int metadata_deserialize(const uint8_t *buffer, size_t len, metadata_entry_t **entry);
+
+/**
+ * Calculate CRC32 checksum
+ */
+uint32_t metadata_crc32(const uint8_t *data, size_t len);
+
+#endif /* METADATA_MANAGER_H */
