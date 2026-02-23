@@ -34,7 +34,6 @@ core
 
 # Test outputs
 test_output/
-*.test
 
 # Docker volumes
 .docker/

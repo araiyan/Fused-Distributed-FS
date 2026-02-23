@@ -58,3 +58,74 @@ services:
     volumes:
       - metadata-wal-3:/tmp/metadata_wal
     restart: unless-stopped
+
+  # Interactive Test Shell (for manual testing and debugging)
+  test-shell:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.test
+    container_name: test-shell
+    hostname: test-shell
+    stdin_open: true
+    tty: true
+    networks:
+      - distributed-fs-net
+    volumes:
+      - ./src:/app/src:ro
+      - ./include:/app/include:ro
+      - ./tests:/app/tests:ro
+      - test-workspace:/app/workspace
+    profiles:
+      - test
+
+  # Storage Node 1 (Placeholder - implement actual storage daemon)
+  storage-node-1:
+    image: ubuntu:22.04
+    container_name: storage-node-1
+    hostname: storage-node-1
+    command: tail -f /dev/null
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-1:/data
+    restart: unless-stopped
+
+  # Storage Node 2
+  storage-node-2:
+    image: ubuntu:22.04
+    container_name: storage-node-2
+    hostname: storage-node-2
+    command: tail -f /dev/null
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-2:/data
+    restart: unless-stopped
+
+  # Storage Node 3
+  storage-node-3:
+    image: ubuntu:22.04
+    container_name: storage-node-3
+    hostname: storage-node-3
+    command: tail -f /dev/null
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-3:/data
+    restart: unless-stopped
+
+networks:
+  distributed-fs-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  metadata-wal-1:
+  metadata-wal-2:
+  metadata-wal-3:
+  storage-data-1:
+  storage-data-2:
+  storage-data-3:
+  test-workspace:
