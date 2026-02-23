@@ -1,0 +1,91 @@
+# Dockerfile.test - Interactive Test Environment for Distributed Core
+FROM ubuntu:22.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install development and debugging tools
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    gdb \
+    valgrind \
+    strace \
+    ltrace \
+    net-tools \
+    iputils-ping \
+    netcat \
+    curl \
+    wget \
+    tcpdump \
+    vim \
+    tmux \
+    htop \
+    tree \
+    bash-completion \
+    man-db \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy organized source structure
+COPY include/ ./include/
+COPY src/ ./src/
+COPY tests/ ./tests/
+COPY Makefile ./
+
+# Create necessary directories
+RUN mkdir -p ./build ./bin /tmp/metadata_wal
+
+# Build the distributed core in debug mode
+ENV CFLAGS="-Wall -Wextra -g -O0 -I./include -fPIC -D_GNU_SOURCE"
+RUN IN_DOCKER=1 make clean && IN_DOCKER=1 make all && IN_DOCKER=1 make test_server
+
+# Verify binary was created
+RUN ls -lh ./bin/test_server
+
+# Expose ports for metadata cluster communication
+EXPOSE 7001 7002 7003
+
+# Set helpful environment variables
+ENV NODE_ID=1
+ENV LISTEN_PORT=7001
+ENV TOTAL_NODES=3
+ENV PEER_NODES=""
+ENV PS1="\[\033[01;32m\]distributed-core\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "
+
+# Create a helpful welcome message
+RUN echo '#!/bin/bash' > /usr/local/bin/show_help && \
+    echo 'echo "=== Distributed Core Test Environment ==="' >> /usr/local/bin/show_help && \
+    echo 'echo ""' >> /usr/local/bin/show_help && \
+    echo 'echo "Available commands:"' >> /usr/local/bin/show_help && \
+    echo 'echo "  make all          - Build libraries"' >> /usr/local/bin/show_help && \
+    echo 'echo "  make test_server  - Build test server"' >> /usr/local/bin/show_help && \
+    echo 'echo "  make clean        - Clean build artifacts"' >> /usr/local/bin/show_help && \
+    echo 'echo ""' >> /usr/local/bin/show_help && \
+    echo 'echo "Run test server:"' >> /usr/local/bin/show_help && \
+    echo 'echo "  ./bin/test_server <node_id> <port> <total_nodes> [peer:port ...]"' >> /usr/local/bin/show_help && \
+    echo 'echo ""' >> /usr/local/bin/show_help && \
+    echo 'echo "Example:"' >> /usr/local/bin/show_help && \
+    echo 'echo "  ./bin/test_server 1 7001 3 metadata-node-2:7002 metadata-node-3:7003"' >> /usr/local/bin/show_help && \
+    echo 'echo ""' >> /usr/local/bin/show_help && \
+    echo 'echo "Debugging:"' >> /usr/local/bin/show_help && \
+    echo 'echo "  gdb ./bin/test_server"' >> /usr/local/bin/show_help && \
+    echo 'echo "  valgrind --leak-check=full ./bin/test_server ..."' >> /usr/local/bin/show_help && \
+    echo 'echo "  strace -f ./bin/test_server ..."' >> /usr/local/bin/show_help && \
+    echo 'echo ""' >> /usr/local/bin/show_help && \
+    echo 'echo "Network tools:"' >> /usr/local/bin/show_help && \
+    echo 'echo "  netstat -tlnp     - Show listening ports"' >> /usr/local/bin/show_help && \
+    echo 'echo "  netstat -an       - Show all connections"' >> /usr/local/bin/show_help && \
+    echo 'echo "  tcpdump -i any    - Capture network traffic"' >> /usr/local/bin/show_help && \
+    echo 'echo ""' >> /usr/local/bin/show_help && \
+    chmod +x /usr/local/bin/show_help
+
+# Add welcome message to bashrc
+RUN echo 'show_help' >> /root/.bashrc
+
+# Entry point - drop into bash shell
+WORKDIR /app
+CMD ["/bin/bash"]
