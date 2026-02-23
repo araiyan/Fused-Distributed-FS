@@ -8,6 +8,11 @@
 *.dylib
 *.dll
 *.exe
+
+# Build artifacts
+../build/libdistributed_core.*
+../bin/test_server
+
 # WAL files
 /tmp/metadata_wal_*.dat
 *.wal
@@ -21,5 +26,15 @@
 .vscode/
 .idea/
 *.sublime-*
+
+# Debug files
+*.dSYM/
+*.pdb
+core
+
+# Test outputs
+test_output/
+*.test
+
 # Docker volumes
 .docker/

@@ -89,3 +89,57 @@ paxos_node_t *paxos_init(uint32_t node_id, uint32_t total_nodes,
  * Destroy and cleanup Paxos node
  */
 void paxos_destroy(paxos_node_t *node);
+
+/**
+ * Propose a new value (Leader/Proposer role)
+ * @param node Paxos node
+ * @param value Value to propose (serialized metadata operation)
+ * @param value_len Length of value
+ * @return 0 on success, -1 on failure
+ */
+int paxos_propose(paxos_node_t *node, void *value, size_t value_len);
+
+/**
+ * Handle incoming Paxos message (Acceptor/Learner role)
+ * @param node Paxos node
+ * @param msg Received message
+ * @param response Output response message (caller must free)
+ * @return 0 if response should be sent, -1 otherwise
+ */
+int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg, 
+                         paxos_message_t **response);
+
+/**
+ * Generate next proposal ID (monotonically increasing, unique per node)
+ */
+uint64_t paxos_next_proposal_id(paxos_node_t *node);
+
+/**
+ * Check if quorum is reached for a proposal
+ */
+bool paxos_check_quorum(paxos_node_t *node, uint32_t count);
+
+/**
+ * Serialize Paxos message for network transmission
+ * @param msg Message to serialize
+ * @param buffer Output buffer (caller must free)
+ * @param len Output length
+ * @return 0 on success, -1 on error
+ */
+int paxos_serialize_message(const paxos_message_t *msg, uint8_t **buffer, size_t *len);
+
+/**
+ * Deserialize Paxos message from network data
+ * @param buffer Input buffer
+ * @param len Buffer length
+ * @param msg Output message (caller must free value field)
+ * @return 0 on success, -1 on error
+ */
+int paxos_deserialize_message(const uint8_t *buffer, size_t len, paxos_message_t *msg);
+
+/**
+ * Free Paxos message resources
+ */
+void paxos_free_message(paxos_message_t *msg);
+
+#endif /* PAXOS_H */
