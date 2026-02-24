@@ -255,11 +255,17 @@ public:
     Status Create(ServerContext* context,
                   const CreateRequest* request,
                   CreateResponse* response) override {
-        (void)context;
-		(void)request;
 		
-		response->set_status_code(-ENOSYS);
-		response->set_error_message("Create not yet implemented");
+		std::string path = normalize_path(request->pathname());
+        mode_t mode = static_cast<mode_t>(request->mode());
+
+        // create file info struct
+        struct fuse_file_info fi;
+        memset(&fi, 0, sizeof(fi));
+        fi.flags = O_CREAT | O_RDWR;
+
+        int res = fused_create(path, mode, fi);
+        response->set_status_code(res);
 		
 		return Status::OK;
     }
@@ -270,11 +276,12 @@ public:
     Status Mkdir(ServerContext* context,
                  const MkdirRequest* request,
                  MkdirResponse* response) override {
-		(void)context;
-		(void)request;
-		
-		response->set_status_code(-ENOSYS);
-		response->set_error_message("Mkdir not yet implemented");
+
+        std::string path = normalize_path(request->pathname());
+        mode_t mode = static_cast<mode_t>(request->mode());
+
+        int res = fused_mkdir(path, mode);
+        response->set_status_code(res);
 		
 		return Status::OK;
     }
