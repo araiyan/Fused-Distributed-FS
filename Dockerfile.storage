@@ -1,0 +1,40 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libfuse-dev \
+    fuse \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler-grpc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy FUSE filesystem source
+COPY include/ /app/include/
+COPY src/ /app/src/
+COPY proto/ /app/proto/
+COPY Makefile /app/
+
+# Build everything
+RUN make clean && make all
+RUN make proto
+RUN make rpc-server
+RUN make tcp-adapter
+
+# Create mount point and data directory
+RUN mkdir -p /mnt/fused /data
+
+# Expose ports
+# 9000 = TCP adapter (Paxos's protocol)
+# 50051 = gRPC server (internal only)
+EXPOSE 9000 50051
+
+# Startup script
+COPY start-storage-node.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-storage-node.sh
+
+CMD ["/usr/local/bin/start-storage-node.sh"]

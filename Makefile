@@ -124,4 +124,20 @@ rpc-server: directories proto $(BUILD_DIR)/fused_ops.o
 		-lgrpc++ -lgrpc -lprotobuf -lpthread -lgrpc++_reflection -lfuse
 	@echo "RPC server built: $(RPC_SERVER)"
 
-.PHONY: test test-unit test-functional
+# ============================================================================
+# TCP ADAPTER (Paxos's Protocol Bridge)
+# ============================================================================
+
+TCP_ADAPTER = $(BIN_DIR)/storage_tcp_adapter
+
+tcp-adapter: directories proto
+	@echo "Building TCP adapter..."
+	$(CXX) -std=c++14 -Wall -Wextra -O2 -D_FILE_OFFSET_BITS=64 -I./include -I$(PROTO_DIR) \
+		src/storage_tcp_adapter.cpp \
+		$(PROTO_DIR)/filesystem.pb.cc \
+		$(PROTO_DIR)/filesystem.grpc.pb.cc \
+		-o $(TCP_ADAPTER) \
+		-lgrpc++ -lgrpc -lprotobuf -lpthread
+	@echo "TCP adapter built: $(TCP_ADAPTER)"
+
+.PHONY: test test-unit test-functional tcp-adapter rpc-server proto clean install uninstall help 
