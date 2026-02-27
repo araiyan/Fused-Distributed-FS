@@ -49,6 +49,22 @@ make
 # The binary will be at: bin/fused_fs
 ```
 
+### Docker compose to test storage node grpc
+```
+cd distributed_core
+docker compose up
+```
+in a seperate terminal:
+```
+rm -rf proto/*.pb.h proto/*.pb.cc
+make proto
+cd proto
+make
+./grpc_client
+```
+You should see 2 entries show up in stdout from the ListDirectories command.
+
+
 ### Docker Build
 
 ```bash

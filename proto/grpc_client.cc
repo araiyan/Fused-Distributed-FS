@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
   absl::InitializeLog();
   // Expect only arg: --db_path=path/to/route_guide_db.json.
   GrpcClient client(
-      grpc::CreateChannel("localhost:50051",
+      grpc::CreateChannel("localhost:50052",
                           grpc::InsecureChannelCredentials()));
 
   const string filename = "test.txt";

@@ -14,7 +14,7 @@ mkdir -p /tmp/fused_backing
 
 # Start gRPC server in background
 echo "[1/2] Starting gRPC server on port ${GRPC_PORT:-50051}..."
-/app/bin/fused_rpc_server &
+exec /app/bin/fused_rpc_server &
 GRPC_PID=$!
 
 # Wait for gRPC to be ready
@@ -26,5 +26,5 @@ if ! kill -0 $GRPC_PID 2>/dev/null; then
     exit 1
 fi
 
-echo "[2/2] Starting TCP adapter on port ${STORAGE_PORT:-9000}..."
-exec /app/bin/storage_tcp_adapter
+#echo "[2/2] Starting TCP adapter on port ${STORAGE_PORT:-9000}..."
+#/app/bin/storage_tcp_adapter &

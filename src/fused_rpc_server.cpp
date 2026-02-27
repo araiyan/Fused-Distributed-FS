@@ -228,7 +228,7 @@ public:
         memset(&fi, 0, sizeof(fi));
         fi.flags = O_CREAT | O_RDWR;
 
-        int res = fused_create(full_path.c_str(), mode, fi);
+        int res = fused_create(full_path.c_str(), mode, &fi);
         response->set_status_code(res);
         if (res < 0)
         {

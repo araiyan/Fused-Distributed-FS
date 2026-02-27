@@ -19,6 +19,8 @@ COPY src/ /app/src/
 COPY proto/ /app/proto/
 COPY Makefile /app/
 
+RUN rm /app/proto/*.pb.h /app/proto/*.pb.cc
+
 # Build everything
 RUN make clean && make all
 RUN make proto

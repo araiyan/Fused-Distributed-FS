@@ -79,28 +79,28 @@ services:
       - test
 
   # Storage Node 1
-    storage-node-1:
-      build:
-        context: ../
-        dockerfile: Dockerfile.storage
-      container_name: storage-node-1
-      hostname: storage-node-1
-      privileged: true
-      devices:
-        - /dev/fuse
-      cap_add:
-        - SYS_ADMIN
-      environment:
-        - NODE_ID=1
-        - STORAGE_PORT=9000
-        - GRPC_PORT=50051
-      ports:
-        - "9001:9000"  # Expose TCP adapter to host
-      networks:
-        - distributed-fs-net
-      volumes:
-        - storage-data-1:/data
-      restart: unless-stopped
+  storage-node-1:
+    build:
+      context: ../
+      dockerfile: Dockerfile.storage
+    container_name: storage-node-1
+    hostname: storage-node-1
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=1
+      - STORAGE_PORT=9000
+      - GRPC_PORT=50051
+    ports:
+      - "50052:50051"  # Expose TCP adapter to host
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-1:/data
+    restart: unless-stopped
 
   # Storage Node 2
   storage-node-2:
@@ -119,7 +119,7 @@ services:
       - STORAGE_PORT=9000
       - GRPC_PORT=50051
     ports:
-      - "9002:9000"
+      - "50053:50051"  # Expose TCP adapter to host
     networks:
       - distributed-fs-net
     volumes:
@@ -143,7 +143,7 @@ services:
       - STORAGE_PORT=9000
       - GRPC_PORT=50051
     ports:
-      - "9003:9000"
+      - "50054:50051"
     networks:
       - distributed-fs-net
     volumes:
