@@ -78,24 +78,48 @@ services:
     profiles:
       - test
 
-  # Storage Node 1 (Placeholder - implement actual storage daemon)
-  storage-node-1:
-    image: ubuntu:22.04
-    container_name: storage-node-1
-    hostname: storage-node-1
-    command: tail -f /dev/null
-    networks:
-      - distributed-fs-net
-    volumes:
-      - storage-data-1:/data
-    restart: unless-stopped
+  # Storage Node 1
+    storage-node-1:
+      build:
+        context: ../
+        dockerfile: Dockerfile.storage
+      container_name: storage-node-1
+      hostname: storage-node-1
+      privileged: true
+      devices:
+        - /dev/fuse
+      cap_add:
+        - SYS_ADMIN
+      environment:
+        - NODE_ID=1
+        - STORAGE_PORT=9000
+        - GRPC_PORT=50051
+      ports:
+        - "9001:9000"  # Expose TCP adapter to host
+      networks:
+        - distributed-fs-net
+      volumes:
+        - storage-data-1:/data
+      restart: unless-stopped
 
   # Storage Node 2
   storage-node-2:
-    image: ubuntu:22.04
+    build:
+      context: ../
+      dockerfile: Dockerfile.storage
     container_name: storage-node-2
     hostname: storage-node-2
-    command: tail -f /dev/null
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=2
+      - STORAGE_PORT=9000
+      - GRPC_PORT=50051
+    ports:
+      - "9002:9000"
     networks:
       - distributed-fs-net
     volumes:
@@ -104,10 +128,22 @@ services:
 
   # Storage Node 3
   storage-node-3:
-    image: ubuntu:22.04
+    build:
+      context: ../
+      dockerfile: Dockerfile.storage
     container_name: storage-node-3
     hostname: storage-node-3
-    command: tail -f /dev/null
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=3
+      - STORAGE_PORT=9000
+      - GRPC_PORT=50051
+    ports:
+      - "9003:9000"
     networks:
       - distributed-fs-net
     volumes:

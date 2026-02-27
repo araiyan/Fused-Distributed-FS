@@ -7,6 +7,7 @@ bin/
 
 # Executables
 fused_fs
+proto/grpc_client
 *.out
 
 # Debug files
