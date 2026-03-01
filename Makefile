@@ -44,6 +44,12 @@ clean:
 	@rm -rf $(BUILD_DIR) $(BIN_DIR)
 	@echo "Clean complete"
 
+# Clean protobuf generated files
+clean-proto:
+	@echo "Cleaning protobuf generated files..."
+	@rm -f $(PROTO_DIR)/*.pb.h $(PROTO_DIR)/*.pb.cc
+	@echo "Protobuf clean complete"
+
 # Install the filesystem binary
 install: $(TARGET)
 	@echo "Installing $(TARGET) to /usr/local/bin/..."
@@ -140,4 +146,48 @@ tcp-adapter: directories proto
 		-lgrpc++ -lgrpc -lprotobuf -lpthread
 	@echo "TCP adapter built: $(TCP_ADAPTER)"
 
-.PHONY: test test-unit test-functional tcp-adapter rpc-server proto clean install uninstall help 
+# ============================================================================
+# DISTRIBUTED FRONTEND COORDINATOR
+# ============================================================================
+
+DIST_CORE_DIR = distributed_core
+DIST_CORE_LIB = $(BUILD_DIR)/libdistributed_core.a
+
+# Build distributed core library first
+$(DIST_CORE_LIB):
+	@echo "Building distributed core library..."
+	@cd $(DIST_CORE_DIR) && $(MAKE) all
+	@mkdir -p $(BUILD_DIR)
+	@cp $(DIST_CORE_DIR)/build/libdistributed_core.a $(BUILD_DIR)/
+	@echo "Distributed core library ready"
+
+DIST_FRONTEND = $(BIN_DIR)/distributed_frontend
+DIST_CLIENT = $(BIN_DIR)/distributed_client
+
+distributed-frontend: directories proto $(DIST_CORE_LIB)
+	@echo "Building distributed frontend coordinator..."
+	$(CXX) -std=c++14 -Wall -Wextra -O2 -D_FILE_OFFSET_BITS=64 \
+		-I./include -I$(PROTO_DIR) -I$(DIST_CORE_DIR)/include \
+		src/distributed_frontend.cpp \
+		$(PROTO_DIR)/filesystem.pb.cc \
+		$(PROTO_DIR)/filesystem.grpc.pb.cc \
+		-o $(DIST_FRONTEND) \
+		$(DIST_CORE_LIB) \
+		-lgrpc++ -lgrpc -lprotobuf -lpthread -lgrpc++_reflection -luuid
+	@echo "Distributed frontend built: $(DIST_FRONTEND)"
+
+distributed-client: directories proto
+	@echo "Building distributed client..."
+	$(CXX) -std=c++14 -Wall -Wextra -O2 -D_FILE_OFFSET_BITS=64 \
+		-I./include -I$(PROTO_DIR) \
+		src/distributed_client.cpp \
+		$(PROTO_DIR)/filesystem.pb.cc \
+		$(PROTO_DIR)/filesystem.grpc.pb.cc \
+		-o $(DIST_CLIENT) \
+		-lgrpc++ -lgrpc -lprotobuf -lpthread
+	@echo "Distributed client built: $(DIST_CLIENT)"
+
+distributed: distributed-frontend distributed-client
+	@echo "All distributed components built successfully"
+
+.PHONY: test test-unit test-functional tcp-adapter rpc-server proto clean install uninstall help distributed distributed-frontend distributed-client

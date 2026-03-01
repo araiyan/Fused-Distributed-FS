@@ -1,0 +1,42 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler-grpc \
+    netcat-openbsd \
+    curl \
+    iputils-ping \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy and build client
+COPY proto/ /app/proto/
+COPY src/distributed_client.cpp /app/src/
+COPY Makefile /app/
+
+# Clean and build
+RUN rm -f /app/proto/*.pb.h /app/proto/*.pb.cc
+RUN mkdir -p /app/bin /app/build
+RUN cd /app && make proto && make distributed-client
+
+# Create test scripts directory
+RUN mkdir -p /app/tests
+
+# Copy test scripts
+COPY scripts/distributed_test.sh /app/tests/
+RUN chmod +x /app/tests/*.sh
+
+# Set up convenient aliases
+RUN echo 'alias dfs="/app/bin/distributed_client"' >> /root/.bashrc
+RUN echo 'echo "Distributed Filesystem Test Client"' >> /root/.bashrc
+RUN echo 'echo "Usage: dfs <frontend_address> <command> [args...]"' >> /root/.bashrc
+RUN echo 'echo "Example: dfs frontend-1:60051 mkdir / videos"' >> /root/.bashrc
+RUN echo 'echo ""' >> /root/.bashrc
+
+CMD ["/bin/bash"]

@@ -90,40 +90,89 @@ extern "C" void* handle_client(void* arg) {
     int client_fd = *(int*)arg;
     free(arg);
     
+    fprintf(stderr, "[TCP Handler] Handling client fd=%d\n", client_fd);
+    fflush(stderr);
+    
     char buffer[MAX_BUFFER];
     ssize_t n = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
     if (n <= 0) {
+        fprintf(stderr, "[TCP Handler] recv returned %zd\n", n);
+        fflush(stderr);
         close(client_fd);
         return NULL;
     }
     buffer[n] = '\0';
     
     printf("[TCP] Received: %.*s", (int)strcspn(buffer, "\n"), buffer);
+    fprintf(stderr, "[TCP Handler] Received %zd bytes: %.*s\n", n, (int)strcspn(buffer, "\n"), buffer);
+    fflush(stderr);
     
     // Parse command
     if (strncmp(buffer, "WRITE|", 6) == 0) {
         char file_id[MAX_FILE_ID];
         uint64_t offset, length;
         
+        // Find the end of the header line
+        char* newline = strchr(buffer, '\n');
+        if (!newline) {
+            fprintf(stderr, "[TCP] No newline found in header\n");
+            fflush(stderr);
+            send(client_fd, "ERROR|Invalid header\n", 21, 0);
+            close(client_fd);
+            return NULL;
+        }
+        
         if (sscanf(buffer, "WRITE|%63[^|]|%lu|%lu\n", 
                    file_id, &offset, &length) == 3) {
             
-            // Receive data payload
+            fprintf(stderr, "[TCP] Parsed: file_id=%s, offset=%lu, length=%lu\n", file_id, offset, length);
+            fflush(stderr);
+            
+            // Calculate how much data was already received after the header
+            size_t header_len = (newline - buffer) + 1;  // Include the newline
+            size_t data_in_buffer = n - header_len;
+            
+            fprintf(stderr, "[TCP] header_len=%zu, data_in_buffer=%zu, total received=%zd\n", 
+                    header_len, data_in_buffer, n);
+            fflush(stderr);
+            
+            // Allocate buffer for full payload
             uint8_t* data = (uint8_t*)malloc(length);
             uint64_t total = 0;
             
+            // Copy any data that was already received
+            if (data_in_buffer > 0) {
+                size_t to_copy = data_in_buffer < length ? data_in_buffer : length;
+                memcpy(data, buffer + header_len, to_copy);
+                total = to_copy;
+                fprintf(stderr, "[TCP] Copied %zu bytes from initial buffer\n", to_copy);
+                fflush(stderr);
+            }
+            
+            // Receive remaining data
             while (total < length) {
                 ssize_t r = recv(client_fd, data + total, length - total, 0);
-                if (r <= 0) break;
+                if (r <= 0) {
+                    fprintf(stderr, "[TCP] recv failed while reading data: %zd\n", r);
+                    fflush(stderr);
+                    break;
+                }
                 total += r;
+                fprintf(stderr, "[TCP] Received %zd more bytes, total=%lu/%lu\n", r, total, length);
+                fflush(stderr);
             }
             
             printf(" → Write: %s, %lu bytes at offset %lu\n", 
                    file_id, total, offset);
+            fprintf(stderr, "[TCP] Calling gRPC Write...\n");
+            fflush(stderr);
             
             // Call gRPC
             int bytes_written = g_client->Write(file_id, offset, data, total);
             free(data);
+            
+            fprintf(stderr, "[TCP] gRPC Write returned %d\n", bytes_written);
+            fflush(stderr);
             
             // Send response
             if (bytes_written > 0) {
@@ -131,10 +180,18 @@ extern "C" void* handle_client(void* arg) {
                 snprintf(resp, sizeof(resp), "OK|%d\n", bytes_written);
                 send(client_fd, resp, strlen(resp), 0);
                 printf("[TCP] Write OK: %d bytes\n", bytes_written);
+                fprintf(stderr, "[TCP] Sent response: %s", resp);
+                fflush(stderr);
             } else {
                 send(client_fd, "ERROR|Write failed\n", 19, 0);
                 printf("[TCP] Write FAILED\n");
+                fprintf(stderr, "[TCP] Write failed, sent error response\n");
+                fflush(stderr);
             }
+        } else {
+            fprintf(stderr, "[TCP] Failed to parse WRITE command\n");
+            fflush(stderr);
+            send(client_fd, "ERROR|Invalid WRITE syntax\n", 27, 0);
         }
     }
     else if (strncmp(buffer, "READ|", 5) == 0) {
@@ -231,11 +288,17 @@ int main(int argc, char** argv) {
     }
     
     printf("[TCP] Listening on 0.0.0.0:%d...\n\n", port);
+    fprintf(stderr, "[TCP] TCP Adapter listening on 0.0.0.0:%d...\n", port);
+    fflush(stdout);
+    fflush(stderr);
     
     // Accept loop
     while (1) {
         int* client_fd = (int*)malloc(sizeof(int));
         *client_fd = accept(server_fd, NULL, NULL);
+        
+        fprintf(stderr, "[TCP] Accepted connection fd=%d\n", *client_fd);
+        fflush(stderr);
         
         if (*client_fd < 0) {
             free(client_fd);

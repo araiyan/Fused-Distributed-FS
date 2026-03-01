@@ -1,0 +1,60 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler-grpc \
+    uuid-dev \
+    curl \
+    net-tools \
+    iputils-ping \
+    vim \
+    nano \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy distributed core library
+COPY distributed_core/ /app/distributed_core/
+RUN cd distributed_core && make clean && make all
+
+# Copy necessary files
+COPY include/ /app/include/
+COPY src/distributed_client.cpp /app/src/
+COPY proto/ /app/proto/
+COPY Makefile /app/
+
+# Clean proto files and build
+RUN rm -f /app/proto/*.pb.h /app/proto/*.pb.cc
+RUN make directories
+RUN make proto
+RUN make distributed-client
+
+# Create a helpful startup script
+RUN echo '#!/bin/bash' > /usr/local/bin/fs-test && \
+    echo 'echo "========================================="' >> /usr/local/bin/fs-test && \
+    echo 'echo " Distributed Filesystem Test Client"' >> /usr/local/bin/fs-test && \
+    echo 'echo "========================================="' >> /usr/local/bin/fs-test && \
+    echo 'echo ""' >> /usr/local/bin/fs-test && \
+    echo 'echo "Available commands:"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  mkdir <path>          - Create directory"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  create <path>         - Create file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  write <path> <data>   - Write to file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  read <path>           - Read file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  ls <path>             - List directory"' >> /usr/local/bin/fs-test && \
+    echo 'echo ""' >> /usr/local/bin/fs-test && \
+    echo 'echo "Frontend servers available:"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  - frontend-1:60051"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  - frontend-2:60052"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  - frontend-3:60053"' >> /usr/local/bin/fs-test && \
+    echo 'echo ""' >> /usr/local/bin/fs-test && \
+    echo 'echo "Usage: /app/bin/distributed_client <frontend-host:port> <command> [args...]"' >> /usr/local/bin/fs-test && \
+    echo 'echo "Example: /app/bin/distributed_client frontend-1:60051 mkdir /testdir"' >> /usr/local/bin/fs-test && \
+    echo 'echo ""' >> /usr/local/bin/fs-test && \
+    chmod +x /usr/local/bin/fs-test
+
+# Keep container running
+CMD ["tail", "-f", "/dev/null"]

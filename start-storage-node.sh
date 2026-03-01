@@ -14,7 +14,7 @@ mkdir -p /tmp/fused_backing
 
 # Start gRPC server in background
 echo "[1/2] Starting gRPC server on port ${GRPC_PORT:-50051}..."
-exec /app/bin/fused_rpc_server &
+/app/bin/fused_rpc_server &
 GRPC_PID=$!
 
 # Wait for gRPC to be ready
@@ -26,5 +26,26 @@ if ! kill -0 $GRPC_PID 2>/dev/null; then
     exit 1
 fi
 
-#echo "[2/2] Starting TCP adapter on port ${STORAGE_PORT:-9000}..."
-#/app/bin/storage_tcp_adapter &
+echo "✓ gRPC server started (PID: $GRPC_PID)"
+
+echo "[2/2] Starting TCP adapter on port ${STORAGE_PORT:-9000}..."
+STORAGE_PORT=${STORAGE_PORT:-9000} GRPC_SERVER="localhost:${GRPC_PORT:-50051}" /app/bin/storage_tcp_adapter &
+TCP_PID=$!
+
+# Wait for TCP adapter to be ready
+sleep 2
+
+# Check if TCP adapter started successfully
+if ! kill -0 $TCP_PID 2>/dev/null; then
+    echo "ERROR: TCP adapter failed to start"
+    exit 1
+fi
+
+echo "✓ TCP adapter started (PID: $TCP_PID)"
+echo ""
+echo "========================================="
+echo " Storage Node Ready"
+echo "========================================="
+
+# Keep container running
+wait

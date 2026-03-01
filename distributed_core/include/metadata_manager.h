@@ -36,6 +36,7 @@ typedef struct {
     time_t accessed_time;                       // Last access timestamp
     
     // Storage location
+    uint32_t storage_nodes[MAX_STORAGE_NODES];   // Node IDs of storage nodes
     char storage_node_ips[MAX_STORAGE_NODES][64]; // IP addresses of storage nodes
     uint32_t storage_node_ports[MAX_STORAGE_NODES]; // Ports of storage nodes
     uint32_t num_storage_nodes;                  // Number of storage nodes holding this file

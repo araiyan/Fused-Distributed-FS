@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
+#include <netdb.h>
 
 #define STORAGE_TIMEOUT_SEC 30
 
@@ -183,6 +184,8 @@ int storage_interface_select_nodes(storage_interface_t *iface, uint64_t file_siz
 
 /* Helper: Connect to storage node */
 static int connect_to_storage_node(const char *ip_address, uint16_t port) {
+    printf("[Connect] Attempting to connect to %s:%u\n", ip_address, port);
+    
     int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd < 0) {
         perror("socket failed");
@@ -205,14 +208,43 @@ static int connect_to_storage_node(const char *ip_address, uint16_t port) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip_address, &server_addr.sin_addr);
     
+    // Try to resolve hostname using getaddrinfo
+    struct addrinfo hints, *result = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    
+    int getaddr_result = getaddrinfo(ip_address, NULL, &hints, &result);
+    printf("[Connect] getaddrinfo returned %d for %s\n", getaddr_result, ip_address);
+    
+    if (getaddr_result == 0) {
+        // Successfully resolved hostname
+        struct sockaddr_in *addr_in = (struct sockaddr_in *)result->ai_addr;
+        server_addr.sin_addr = addr_in->sin_addr;
+        char resolved_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &server_addr.sin_addr, resolved_ip, INET_ADDRSTRLEN);
+        printf("[Connect] Resolved %s to %s\n", ip_address, resolved_ip);
+        freeaddrinfo(result);
+    } else {
+        // Fall back to inet_pton for IP addresses
+        printf("[Connect] Trying inet_pton for %s\n", ip_address);
+        if (inet_pton(AF_INET, ip_address, &server_addr.sin_addr) <= 0) {
+            fprintf(stderr, "Failed to resolve address: %s\n", ip_address);
+            close(sock_fd);
+            return -1;
+        }
+    }
+    
+    printf("[Connect] Calling connect() to %s:%u...\n", ip_address, port);
     if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         perror("connect failed");
+        printf("[Connect] connect() failed with errno=%d\n", errno);
         close(sock_fd);
         return -1;
     }
     
+    printf("[Connect] Successfully connected!\n");
     return sock_fd;
 }
 
@@ -227,14 +259,24 @@ int storage_interface_write(storage_interface_t *iface, uint32_t node_id,
     
     memset(response, 0, sizeof(storage_response_t));
     
+    printf("[StorageInterface] Write request: node_id=%u, file_id=%s\n", node_id, file_id);
+    printf("[StorageInterface] Registered nodes: ");
+    for (uint32_t i = 0; i < iface->num_nodes; i++) {
+        printf("%u ", iface->nodes[i].node_id);
+    }
+    printf("\n");
+    
     // Find storage node
     storage_node_info_t *node = storage_interface_get_node(iface, node_id);
     if (!node) {
         response->status = -1;
         snprintf(response->error_msg, sizeof(response->error_msg), 
                 "Storage node %u not found", node_id);
+        printf("[StorageInterface] Storage node %u not found!\n", node_id);
         return -1;
     }
+    
+    printf("[StorageInterface] Found node %u at %s:%u\n", node_id, node->ip_address, node->port);
     
     // Connect to storage node
     int sock_fd = connect_to_storage_node(node->ip_address, node->port);
@@ -242,6 +284,7 @@ int storage_interface_write(storage_interface_t *iface, uint32_t node_id,
         response->status = -1;
         snprintf(response->error_msg, sizeof(response->error_msg),
                 "Failed to connect to storage node %u", node_id);
+        printf("[StorageInterface] Failed to connect to %s:%u\n", node->ip_address, node->port);
         return -1;
     }
     

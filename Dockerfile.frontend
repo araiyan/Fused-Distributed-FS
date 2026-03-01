@@ -1,0 +1,45 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libgrpc++-dev \
+    libprotobuf-dev \
+    protobuf-compiler-grpc \
+    uuid-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy distributed core
+COPY distributed_core/ /app/distributed_core/
+
+# Build distributed core library
+RUN cd distributed_core && make clean && make all
+
+# Copy frontend source
+COPY include/ /app/include/
+COPY src/distributed_frontend.cpp /app/src/
+COPY proto/ /app/proto/
+COPY Makefile /app/
+
+# Clean and rebuild proto
+RUN rm -f /app/proto/*.pb.h /app/proto/*.pb.cc
+
+# Build frontend
+RUN make directories
+RUN make proto
+RUN make distributed-frontend
+
+# Create required directories
+RUN mkdir -p /tmp/frontend_wal
+
+# Expose gRPC port (client-facing) and P2P port
+EXPOSE 60051 8001
+
+# Entrypoint script
+COPY scripts/start-frontend.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-frontend.sh
+
+CMD ["/usr/local/bin/start-frontend.sh"]

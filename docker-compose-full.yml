@@ -1,0 +1,298 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Metadata Cluster (Paxos-based consensus for file metadata)
+  # ============================================================================
+  
+  metadata-node-1:
+    build:
+      context: ./distributed_core
+      dockerfile: docker/Dockerfile
+    container_name: metadata-node-1
+    hostname: metadata-node-1
+    environment:
+      - NODE_ID=1
+      - LISTEN_PORT=7001
+      - TOTAL_NODES=3
+      - PEER_NODES=metadata-node-2:7002 metadata-node-3:7003
+    ports:
+      - "7001:7001"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - metadata-wal-1:/tmp/metadata_wal
+    restart: unless-stopped
+
+  metadata-node-2:
+    build:
+      context: ./distributed_core
+      dockerfile: docker/Dockerfile
+    container_name: metadata-node-2
+    hostname: metadata-node-2
+    environment:
+      - NODE_ID=2
+      - LISTEN_PORT=7002
+      - TOTAL_NODES=3
+      - PEER_NODES=metadata-node-1:7001 metadata-node-3:7003
+    ports:
+      - "7002:7002"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - metadata-wal-2:/tmp/metadata_wal
+    restart: unless-stopped
+
+  metadata-node-3:
+    build:
+      context: ./distributed_core
+      dockerfile: docker/Dockerfile
+    container_name: metadata-node-3
+    hostname: metadata-node-3
+    environment:
+      - NODE_ID=3
+      - LISTEN_PORT=7003
+      - TOTAL_NODES=3
+      - PEER_NODES=metadata-node-1:7001 metadata-node-2:7002
+    ports:
+      - "7003:7003"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - metadata-wal-3:/tmp/metadata_wal
+    restart: unless-stopped
+
+  # ============================================================================
+  # Storage Nodes (gRPC file servers with FUSE backend)
+  # ============================================================================
+  
+  storage-node-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: storage-node-1
+    hostname: storage-node-1
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=1
+      - STORAGE_PORT=9000
+      - GRPC_PORT=50051
+      - RPC_PORT=50051
+    ports:
+      - "9001:9000"
+      - "50051:50051"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-1:/data
+    restart: unless-stopped
+
+  storage-node-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: storage-node-2
+    hostname: storage-node-2
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=2
+      - STORAGE_PORT=9000
+      - GRPC_PORT=50051
+      - RPC_PORT=50051
+    ports:
+      - "9002:9000"
+      - "50052:50051"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-2:/data
+    restart: unless-stopped
+
+  storage-node-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: storage-node-3
+    hostname: storage-node-3
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=3
+      - STORAGE_PORT=9000
+      - GRPC_PORT=50051
+      - RPC_PORT=50051
+    ports:
+      - "9003:9000"
+      - "50053:50051"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data-3:/data
+    restart: unless-stopped
+
+  # ============================================================================
+  # Frontend Coordinators (Client-facing API + Metadata/Storage orchestration)
+  # ============================================================================
+  
+  frontend-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend-1
+    hostname: frontend-1
+    environment:
+      - NODE_ID=1
+      - LISTEN_PORT=8001
+      - TOTAL_NODES=3
+      - PEER_NODES=2@metadata-node-2:7002 3@metadata-node-3:7003
+      - FRONTEND_GRPC_PORT=60051
+      - STORAGE_NODES=storage-node-1:9000 storage-node-2:9000 storage-node-3:9000
+    expose:
+      - "60051"  # Client-facing gRPC (internal only)
+      - "8001"    # Inter-frontend P2P
+    networks:
+      - distributed-fs-net
+    depends_on:
+      - metadata-node-1
+      - metadata-node-2
+      - metadata-node-3
+      - storage-node-1
+      - storage-node-2
+      - storage-node-3
+    restart: unless-stopped
+
+  frontend-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend-2
+    hostname: frontend-2
+    environment:
+      - NODE_ID=2
+      - LISTEN_PORT=8002
+      - TOTAL_NODES=3
+      - PEER_NODES=1@metadata-node-1:7001 3@metadata-node-3:7003
+      - FRONTEND_GRPC_PORT=60052
+      - STORAGE_NODES=storage-node-1:9000 storage-node-2:9000 storage-node-3:9000
+    expose:
+      - "60052"  # Client-facing gRPC (internal only)
+      - "8002"    # Inter-frontend P2P
+    networks:
+      - distributed-fs-net
+    depends_on:
+      - metadata-node-1
+      - metadata-node-2
+      - metadata-node-3
+      - storage-node-1
+      - storage-node-2
+      - storage-node-3
+    restart: unless-stopped
+
+  frontend-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend-3
+    hostname: frontend-3
+    environment:
+      - NODE_ID=3
+      - LISTEN_PORT=8003
+      - TOTAL_NODES=3
+      - PEER_NODES=1@metadata-node-1:7001 2@metadata-node-2:7002
+      - FRONTEND_GRPC_PORT=60053
+      - STORAGE_NODES=storage-node-1:9000 storage-node-2:9000 storage-node-3:9000
+    expose:
+      - "60053"  # Client-facing gRPC (internal only)
+      - "8003"    # Inter-frontend P2P
+    networks:
+      - distributed-fs-net
+    depends_on:
+      - metadata-node-1
+      - metadata-node-2
+      - metadata-node-3
+      - storage-node-1
+      - storage-node-2
+      - storage-node-3
+    restart: unless-stopped
+
+  # ============================================================================
+  # Interactive Shell (Main test interface)
+  # ============================================================================
+  
+  interactive-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile.interactive
+    container_name: interactive-shell
+    hostname: interactive-shell
+    stdin_open: true
+    tty: true
+    networks:
+      - distributed-fs-net
+    depends_on:
+      - frontend-1
+      - frontend-2
+      - frontend-3
+    restart: unless-stopped
+    command: /bin/bash
+
+  # ============================================================================
+  # Test Client (Automated testing container)
+  # ============================================================================
+  
+  test-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.testclient
+    container_name: test-client
+    hostname: test-client
+    stdin_open: true
+    tty: true
+    networks:
+      - distributed-fs-net
+    depends_on:
+      - frontend-1
+      - frontend-2
+      - frontend-3
+    profiles:
+      - test
+
+# ============================================================================
+# Volumes
+# ============================================================================
+
+volumes:
+  metadata-wal-1:
+    driver: local
+  metadata-wal-2:
+    driver: local
+  metadata-wal-3:
+    driver: local
+  storage-data-1:
+    driver: local
+  storage-data-2:
+    driver: local
+  storage-data-3:
+    driver: local
+
+# ============================================================================
+# Networks
+# ============================================================================
+
+networks:
+  distributed-fs-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

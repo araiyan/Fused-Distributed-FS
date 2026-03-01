@@ -67,10 +67,33 @@ public:
         fused_inode_t *inode = path_to_inode(path.c_str());
         if (!inode)
         {
-            response->set_status_code(-ENOENT);
-            response->set_error_message("File not found");
-            response->set_bytes_written(0);
-            return Status::OK;
+            // File doesn't exist yet - create it
+            log_message("RPC Write: File %s not found, creating it", path.c_str());
+            
+            // Create the file with default permissions
+            struct fuse_file_info fi_create;
+            memset(&fi_create, 0, sizeof(fi_create));
+            mode_t mode = 0644;
+            
+            int create_result = fused_create(path.c_str(), mode, &fi_create);
+            if (create_result < 0) {
+                response->set_status_code(create_result);
+                response->set_error_message("Failed to create file");
+                response->set_bytes_written(0);
+                log_message("RPC Write: Failed to create file: %s", strerror(-create_result));
+                return Status::OK;
+            }
+            
+            // Now look up the newly created inode
+            inode = path_to_inode(path.c_str());
+            if (!inode) {
+                response->set_status_code(-EIO);
+                response->set_error_message("Failed to get inode after creation");
+                response->set_bytes_written(0);
+                return Status::OK;
+            }
+            
+            log_message("RPC Write: File created successfully");
         }
 
         struct fuse_file_info fi;
