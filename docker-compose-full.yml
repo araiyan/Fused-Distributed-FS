@@ -155,7 +155,7 @@ services:
       - NODE_ID=1
       - LISTEN_PORT=8001
       - TOTAL_NODES=3
-      - PEER_NODES=2@metadata-node-2:7002 3@metadata-node-3:7003
+      - PEER_NODES=2@frontend-2:8002 3@frontend-3:8003
       - FRONTEND_GRPC_PORT=60051
       - STORAGE_NODES=storage-node-1:9000 storage-node-2:9000 storage-node-3:9000
     expose:
@@ -182,7 +182,7 @@ services:
       - NODE_ID=2
       - LISTEN_PORT=8002
       - TOTAL_NODES=3
-      - PEER_NODES=1@metadata-node-1:7001 3@metadata-node-3:7003
+      - PEER_NODES=1@frontend-1:8001 3@frontend-3:8003
       - FRONTEND_GRPC_PORT=60052
       - STORAGE_NODES=storage-node-1:9000 storage-node-2:9000 storage-node-3:9000
     expose:
@@ -209,7 +209,7 @@ services:
       - NODE_ID=3
       - LISTEN_PORT=8003
       - TOTAL_NODES=3
-      - PEER_NODES=1@metadata-node-1:7001 2@metadata-node-2:7002
+      - PEER_NODES=1@frontend-1:8001 2@frontend-2:8002
       - FRONTEND_GRPC_PORT=60053
       - STORAGE_NODES=storage-node-1:9000 storage-node-2:9000 storage-node-3:9000
     expose:

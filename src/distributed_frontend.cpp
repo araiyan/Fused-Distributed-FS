@@ -12,6 +12,7 @@
 #include <grpcpp/health_check_service_interface.h>
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include "filesystem.grpc.pb.h"
+#include <chrono>
 
 extern "C" {
 #include "../distributed_core/include/paxos.h"
@@ -83,7 +84,30 @@ extern "C" {
 
     void apply_state_machine(uint64_t seq, void *value, size_t len) {
         printf("[Paxos] Applying sequence %lu to state machine (%zu bytes)\n", seq, len);
-        // In production, this would apply the metadata change
+        if (!g_metadata || !value || len == 0) {
+            return;
+        }
+
+        metadata_entry_t *incoming = nullptr;
+        if (metadata_deserialize((const uint8_t *)value, len, &incoming) != 0 || !incoming) {
+            return;
+        }
+
+        metadata_entry_t *local = metadata_lookup(g_metadata, incoming->file_id);
+        if (!local) {
+            local = metadata_create_entry(g_metadata, incoming->path, incoming->mode,
+                                          incoming->uid, incoming->gid);
+        }
+
+        if (local) {
+            pthread_rwlock_wrlock(&local->lock);
+            size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+            memcpy(local, incoming, copy_len);
+            pthread_rwlock_unlock(&local->lock);
+        }
+
+        pthread_rwlock_destroy(&incoming->lock);
+        free(incoming);
     }
 
     void handle_network_message(uint32_t sender_id, message_type_t type,
@@ -352,8 +376,6 @@ public:
     Status Get(ServerContext *context,
                const GetRequest *request,
                GetResponse *response) override {
-        (void)context;
-
         std::string path = normalize_path(request->pathname());
         off_t offset = request->offset();
         size_t size = request->size();
@@ -367,6 +389,49 @@ public:
         metadata_entry_t *entry = metadata_lookup_by_path(g_metadata, path.c_str());
         if (!entry) {
             pthread_mutex_unlock(&g_coordinator_lock);
+
+            bool no_forward = (context->client_metadata().find("x-no-forward") !=
+                               context->client_metadata().end());
+
+            if (!no_forward) {
+                int self_id = 0;
+                const char *node_id_env = getenv("NODE_ID");
+                if (node_id_env) {
+                    self_id = atoi(node_id_env);
+                }
+
+                for (int peer_id = 1; peer_id <= 3; peer_id++) {
+                    if (peer_id == self_id) {
+                        continue;
+                    }
+
+                    std::string peer_addr = "frontend-" + std::to_string(peer_id) +
+                                            ":6005" + std::to_string(peer_id);
+
+                    auto channel = grpc::CreateChannel(peer_addr,
+                        grpc::InsecureChannelCredentials());
+                    auto stub = FileSystemService::NewStub(channel);
+
+                    GetRequest forward_req;
+                    forward_req.set_pathname(path);
+                    forward_req.set_offset(offset);
+                    forward_req.set_size(request->size());
+
+                    GetResponse forward_resp;
+                    grpc::ClientContext forward_ctx;
+                    forward_ctx.AddMetadata("x-no-forward", "1");
+                    forward_ctx.set_deadline(std::chrono::system_clock::now() +
+                                             std::chrono::milliseconds(1500));
+
+                    grpc::Status peer_status = stub->Get(&forward_ctx, forward_req, &forward_resp);
+                    if (peer_status.ok() && forward_resp.status_code() == 0) {
+                        response->CopyFrom(forward_resp);
+                        printf("[Frontend] Get served via peer frontend-%d\n", peer_id);
+                        return Status::OK;
+                    }
+                }
+            }
+
             response->set_status_code(-ENOENT);
             response->set_error_message("File not found");
             response->set_bytes_read(0);
@@ -431,6 +496,13 @@ public:
         printf("[Frontend] ReadDirectory: path=%s\n", path.c_str());
 
         pthread_mutex_lock(&g_coordinator_lock);
+
+        if (path == "/") {
+            response->set_status_code(0);
+            printf("[Frontend] ReadDirectory success: 0 entries (root)\n");
+            pthread_mutex_unlock(&g_coordinator_lock);
+            return Status::OK;
+        }
 
         // Lookup directory metadata
         metadata_entry_t *dir_entry = metadata_lookup_by_path(g_metadata, path.c_str());
