@@ -38,8 +38,8 @@ RUN mkdir -p /tmp/frontend_wal
 # Expose gRPC port (client-facing) and P2P port
 EXPOSE 60051 8001
 
-# Entrypoint script
-COPY scripts/start-frontend.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-frontend.sh
+# Copy and set entrypoint
+COPY entrypoint-frontend.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-CMD ["/usr/local/bin/start-frontend.sh"]
+CMD ["/bin/bash", "/entrypoint.sh"]
