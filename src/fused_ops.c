@@ -337,8 +337,17 @@ int fused_create(const char *path, mode_t mode, struct fuse_file_info *fi)
     }
     // overwrite file type as 'regular'
     inode->mode = S_IFREG | (mode & 0777);
-    inode->uid = fuse_get_context()->uid;
-    inode->gid = fuse_get_context()->gid;
+    struct fuse_context *ctx = fuse_get_context();
+    if (ctx)
+    {
+        inode->uid = ctx->uid;
+        inode->gid = ctx->gid;
+    }
+    else
+    {
+        inode->uid = getuid();
+        inode->gid = getgid();
+    }
     inode->size = 0;
 
     // accessed, modified, and created now
