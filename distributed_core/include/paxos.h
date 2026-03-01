@@ -45,9 +45,12 @@ typedef struct {
     
     pthread_mutex_t lock;
     pthread_cond_t quorum_reached;
+    bool in_use;
     bool completed;
     bool committed;
 } paxos_proposal_t;
+
+typedef int (*paxos_broadcast_callback_t)(const paxos_message_t *msg, void *ctx);
 
 /* Paxos Node Configuration */
 typedef struct {
@@ -58,6 +61,7 @@ typedef struct {
     // Current Paxos state
     uint64_t highest_proposal_seen;
     uint64_t highest_sequence_committed;
+    uint64_t next_sequence_number;
     uint64_t last_accepted_proposal;
     
     // Active proposals (Proposer role)
@@ -69,6 +73,9 @@ typedef struct {
     // Callbacks
     int (*persist_callback)(uint64_t seq, void *value, size_t len);
     void (*apply_callback)(uint64_t seq, void *value, size_t len);
+    paxos_broadcast_callback_t broadcast_callback;
+    void *broadcast_context;
+    uint32_t proposal_timeout_ms;
 } paxos_node_t;
 
 /* Paxos API Functions */
@@ -98,6 +105,21 @@ void paxos_destroy(paxos_node_t *node);
  * @return 0 on success, -1 on failure
  */
 int paxos_propose(paxos_node_t *node, void *value, size_t value_len);
+
+/**
+ * Configure network broadcast callback used by proposer to send PREPARE/ACCEPT
+ * @param node Paxos node
+ * @param cb Callback that broadcasts a Paxos message to all peers
+ * @param ctx Opaque context passed to callback
+ */
+void paxos_set_broadcast_callback(paxos_node_t *node,
+                                  paxos_broadcast_callback_t cb,
+                                  void *ctx);
+
+/**
+ * Configure proposal timeout in milliseconds (default: 3000ms)
+ */
+void paxos_set_proposal_timeout(paxos_node_t *node, uint32_t timeout_ms);
 
 /**
  * Handle incoming Paxos message (Acceptor/Learner role)

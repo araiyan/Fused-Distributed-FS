@@ -5,6 +5,72 @@
 #include <inttypes.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
+
+static void paxos_release_proposal_slot(paxos_proposal_t *proposal) {
+    if (!proposal) {
+        return;
+    }
+
+    if (proposal->proposed_value) {
+        free(proposal->proposed_value);
+        proposal->proposed_value = NULL;
+    }
+
+    proposal->proposal_id = 0;
+    proposal->sequence_number = 0;
+    proposal->value_len = 0;
+    proposal->promise_count = 0;
+    proposal->accept_count = 0;
+    proposal->reject_count = 0;
+    proposal->in_use = false;
+    proposal->completed = false;
+    proposal->committed = false;
+}
+
+static int paxos_wait_for_condition(paxos_node_t *node,
+                                    paxos_proposal_t *proposal,
+                                    bool wait_for_commit) {
+    if (!node || !proposal) {
+        return -1;
+    }
+
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += node->proposal_timeout_ms / 1000;
+    deadline.tv_nsec += (long)(node->proposal_timeout_ms % 1000) * 1000000L;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec += 1;
+        deadline.tv_nsec -= 1000000000L;
+    }
+
+    int wait_status = 0;
+    while (proposal->in_use) {
+        bool satisfied = wait_for_commit
+            ? proposal->committed
+            : paxos_check_quorum(node, proposal->promise_count);
+
+        if (satisfied) {
+            return 0;
+        }
+
+        wait_status = pthread_cond_timedwait(&proposal->quorum_reached,
+                                             &proposal->lock,
+                                             &deadline);
+        if (wait_status == ETIMEDOUT) {
+            bool late_success = wait_for_commit
+                ? proposal->committed
+                : paxos_check_quorum(node, proposal->promise_count);
+            return late_success ? 0 : -1;
+        }
+
+        if (wait_status != 0) {
+            return -1;
+        }
+    }
+
+    return -1;
+}
 
 /* Initialize Paxos node */
 paxos_node_t *paxos_init(uint32_t node_id, uint32_t total_nodes,
@@ -26,7 +92,9 @@ paxos_node_t *paxos_init(uint32_t node_id, uint32_t total_nodes,
     
     node->highest_proposal_seen = 0;
     node->highest_sequence_committed = 0;
+    node->next_sequence_number = 1;
     node->last_accepted_proposal = 0;
+    node->proposal_timeout_ms = 3000;
     
     // Initialize proposal pool
     node->max_proposals = 256;
@@ -47,6 +115,8 @@ paxos_node_t *paxos_init(uint32_t node_id, uint32_t total_nodes,
     
     node->persist_callback = persist_cb;
     node->apply_callback = apply_cb;
+    node->broadcast_callback = NULL;
+    node->broadcast_context = NULL;
     
     return node;
 }
@@ -93,30 +163,41 @@ int paxos_propose(paxos_node_t *node, void *value, size_t value_len) {
     if (!node || !value || value_len == 0) {
         return -1;
     }
+
+    if (!node->broadcast_callback) {
+        fprintf(stderr, "Paxos broadcast callback not configured\n");
+        return -1;
+    }
     
     // Generate unique proposal ID
     uint64_t proposal_id = paxos_next_proposal_id(node);
     
     pthread_mutex_lock(&node->state_lock);
-    uint64_t sequence = ++node->highest_sequence_committed;
+    uint64_t sequence = node->next_sequence_number++;
     pthread_mutex_unlock(&node->state_lock);
     
     // Find free proposal slot
     paxos_proposal_t *proposal = NULL;
     for (size_t i = 0; i < node->max_proposals; i++) {
         pthread_mutex_lock(&node->active_proposals[i].lock);
-        if (!node->active_proposals[i].completed) {
+        if (!node->active_proposals[i].in_use) {
             proposal = &node->active_proposals[i];
+            proposal->in_use = true;
+            proposal->completed = false;
+            proposal->committed = false;
             proposal->proposal_id = proposal_id;
             proposal->sequence_number = sequence;
             proposal->proposed_value = malloc(value_len);
+            if (!proposal->proposed_value) {
+                proposal->in_use = false;
+                pthread_mutex_unlock(&node->active_proposals[i].lock);
+                return -1;
+            }
             memcpy(proposal->proposed_value, value, value_len);
             proposal->value_len = value_len;
             proposal->promise_count = 1; // Count self
             proposal->accept_count = 0;
             proposal->reject_count = 0;
-            proposal->completed = false;
-            proposal->committed = false;
             pthread_mutex_unlock(&node->active_proposals[i].lock);
             break;
         }
@@ -127,11 +208,93 @@ int paxos_propose(paxos_node_t *node, void *value, size_t value_len) {
         fprintf(stderr, "No free proposal slots\n");
         return -1;
     }
-    
-    // NOTE: Caller must send PREPARE messages to all acceptors via network_engine
-    // and handle PROMISE/REJECT responses via paxos_handle_message
-    
-    return 0;
+
+    paxos_message_t prepare_msg;
+    memset(&prepare_msg, 0, sizeof(prepare_msg));
+    prepare_msg.phase = PAXOS_PHASE_PREPARE;
+    prepare_msg.proposal_id = proposal_id;
+    prepare_msg.sequence_number = sequence;
+    prepare_msg.sender_id = node->node_id;
+
+    if (node->broadcast_callback(&prepare_msg, node->broadcast_context) < 0) {
+        pthread_mutex_lock(&proposal->lock);
+        paxos_release_proposal_slot(proposal);
+        pthread_mutex_unlock(&proposal->lock);
+        return -1;
+    }
+
+    pthread_mutex_lock(&proposal->lock);
+    if (paxos_wait_for_condition(node, proposal, false) != 0) {
+        paxos_release_proposal_slot(proposal);
+        pthread_mutex_unlock(&proposal->lock);
+        return -1;
+    }
+    pthread_mutex_unlock(&proposal->lock);
+
+    pthread_mutex_lock(&node->state_lock);
+    if (proposal_id >= node->highest_proposal_seen) {
+        node->highest_proposal_seen = proposal_id;
+        node->last_accepted_proposal = proposal_id;
+    }
+    pthread_mutex_unlock(&node->state_lock);
+
+    if (node->persist_callback && node->persist_callback(sequence, value, value_len) != 0) {
+        pthread_mutex_lock(&proposal->lock);
+        paxos_release_proposal_slot(proposal);
+        pthread_mutex_unlock(&proposal->lock);
+        return -1;
+    }
+
+    pthread_mutex_lock(&proposal->lock);
+    proposal->accept_count = 1; // Count self after local accept persistence
+    pthread_mutex_unlock(&proposal->lock);
+
+    paxos_message_t accept_msg;
+    memset(&accept_msg, 0, sizeof(accept_msg));
+    accept_msg.phase = PAXOS_PHASE_ACCEPT;
+    accept_msg.proposal_id = proposal_id;
+    accept_msg.sequence_number = sequence;
+    accept_msg.sender_id = node->node_id;
+    accept_msg.value = value;
+    accept_msg.value_len = value_len;
+
+    if (node->broadcast_callback(&accept_msg, node->broadcast_context) < 0) {
+        pthread_mutex_lock(&proposal->lock);
+        paxos_release_proposal_slot(proposal);
+        pthread_mutex_unlock(&proposal->lock);
+        return -1;
+    }
+
+    pthread_mutex_lock(&proposal->lock);
+    int wait_rc = paxos_wait_for_condition(node, proposal, true);
+    bool committed = proposal->committed;
+    paxos_release_proposal_slot(proposal);
+    pthread_mutex_unlock(&proposal->lock);
+
+    return (wait_rc == 0 && committed) ? 0 : -1;
+}
+
+void paxos_set_broadcast_callback(paxos_node_t *node,
+                                  paxos_broadcast_callback_t cb,
+                                  void *ctx) {
+    if (!node) {
+        return;
+    }
+
+    pthread_mutex_lock(&node->state_lock);
+    node->broadcast_callback = cb;
+    node->broadcast_context = ctx;
+    pthread_mutex_unlock(&node->state_lock);
+}
+
+void paxos_set_proposal_timeout(paxos_node_t *node, uint32_t timeout_ms) {
+    if (!node || timeout_ms == 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&node->state_lock);
+    node->proposal_timeout_ms = timeout_ms;
+    pthread_mutex_unlock(&node->state_lock);
 }
 
 /* Handle incoming Paxos message (Acceptor/Learner role) */
@@ -173,6 +336,7 @@ int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg,
             for (size_t i = 0; i < node->max_proposals; i++) {
                 pthread_mutex_lock(&node->active_proposals[i].lock);
                 if (node->active_proposals[i].proposal_id == msg->proposal_id &&
+                    node->active_proposals[i].in_use &&
                     !node->active_proposals[i].completed) {
                     node->active_proposals[i].promise_count++;
                     
@@ -219,6 +383,7 @@ int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg,
             for (size_t i = 0; i < node->max_proposals; i++) {
                 pthread_mutex_lock(&node->active_proposals[i].lock);
                 if (node->active_proposals[i].proposal_id == msg->proposal_id &&
+                    node->active_proposals[i].in_use &&
                     !node->active_proposals[i].completed) {
                     node->active_proposals[i].accept_count++;
                     
@@ -226,6 +391,9 @@ int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg,
                         // Value is committed!
                         node->active_proposals[i].committed = true;
                         node->active_proposals[i].completed = true;
+                        if (msg->sequence_number > node->highest_sequence_committed) {
+                            node->highest_sequence_committed = msg->sequence_number;
+                        }
                         
                         // Apply to state machine
                         if (node->apply_callback) {

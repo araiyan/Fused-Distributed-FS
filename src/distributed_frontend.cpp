@@ -13,6 +13,7 @@
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include "filesystem.grpc.pb.h"
 #include <chrono>
+#include <unordered_map>
 
 extern "C" {
 #include "../distributed_core/include/paxos.h"
@@ -79,7 +80,39 @@ std::string normalize_path(const std::string &path) {
 extern "C" {
     int persist_wal(uint64_t seq, void *value, size_t len) {
         printf("[Paxos] Persisting sequence %lu (%zu bytes)\n", seq, len);
-        return 0;
+        if (!g_metadata || !value || len == 0) {
+            return -1;
+        }
+
+        metadata_entry_t *entry = nullptr;
+        if (metadata_deserialize((const uint8_t *)value, len, &entry) != 0 || !entry) {
+            return -1;
+        }
+
+        uint64_t lsn = wal_append(g_metadata, WAL_OP_UPDATE, entry);
+        pthread_rwlock_destroy(&entry->lock);
+        free(entry);
+
+        return (lsn == UINT64_MAX) ? -1 : 0;
+    }
+
+    int paxos_broadcast_message(const paxos_message_t *msg, void *ctx) {
+        if (!msg || !ctx) {
+            return -1;
+        }
+
+        network_engine_t *network = (network_engine_t *)ctx;
+        uint8_t *serialized = nullptr;
+        size_t serialized_len = 0;
+
+        if (paxos_serialize_message(msg, &serialized, &serialized_len) != 0) {
+            return -1;
+        }
+
+        int sent = network_engine_broadcast(network, MSG_TYPE_PAXOS, serialized, serialized_len);
+        free(serialized);
+
+        return (sent < 0) ? -1 : 0;
     }
 
     void apply_state_machine(uint64_t seq, void *value, size_t len) {
@@ -93,18 +126,7 @@ extern "C" {
             return;
         }
 
-        metadata_entry_t *local = metadata_lookup(g_metadata, incoming->file_id);
-        if (!local) {
-            local = metadata_create_entry(g_metadata, incoming->path, incoming->mode,
-                                          incoming->uid, incoming->gid);
-        }
-
-        if (local) {
-            pthread_rwlock_wrlock(&local->lock);
-            size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
-            memcpy(local, incoming, copy_len);
-            pthread_rwlock_unlock(&local->lock);
-        }
+        metadata_apply_entry(g_metadata, incoming);
 
         pthread_rwlock_destroy(&incoming->lock);
         free(incoming);
@@ -169,21 +191,22 @@ public:
 
         pthread_mutex_lock(&g_coordinator_lock);
 
-        // 1. Create metadata entry
+        // 1. Build metadata entry for consensus proposal
         std::string file_id = generate_file_id(full_path);
-        metadata_entry_t *entry = metadata_create_entry(
-            g_metadata, full_path.c_str(), 
-            S_IFREG | mode, getuid(), getgid());
-        
-        if (!entry) {
-            pthread_mutex_unlock(&g_coordinator_lock);
-            response->set_status_code(-ENOMEM);
-            response->set_error_message("Failed to create metadata entry");
-            return Status::OK;
-        }
-
-        // Copy generated file_id
-        strncpy(entry->file_id, file_id.c_str(), sizeof(entry->file_id) - 1);
+        metadata_entry_t proposed_entry;
+        memset(&proposed_entry, 0, sizeof(proposed_entry));
+        strncpy(proposed_entry.file_id, file_id.c_str(), sizeof(proposed_entry.file_id) - 1);
+        strncpy(proposed_entry.path, full_path.c_str(), sizeof(proposed_entry.path) - 1);
+        proposed_entry.state = FILE_STATE_ACTIVE;
+        proposed_entry.size = 0;
+        proposed_entry.mode = S_IFREG | mode;
+        proposed_entry.uid = getuid();
+        proposed_entry.gid = getgid();
+        proposed_entry.created_time = time(nullptr);
+        proposed_entry.modified_time = proposed_entry.created_time;
+        proposed_entry.accessed_time = proposed_entry.created_time;
+        proposed_entry.version = 1;
+        proposed_entry.stripe_size = 4194304;
 
         // 2. Select storage nodes (3 replicas by default)
         uint32_t selected_nodes[MAX_REPLICAS];
@@ -201,20 +224,20 @@ public:
         for (int i = 0; i < num_selected && i < MAX_STORAGE_NODES; i++) {
             storage_node_info_t *node = storage_interface_get_node(g_storage, selected_nodes[i]);
             if (node) {
-                strncpy(entry->storage_node_ips[i], node->ip_address, 63);
-                entry->storage_node_ports[i] = node->port;
-                entry->storage_nodes[i] = selected_nodes[i]; // Store node ID
+                strncpy(proposed_entry.storage_node_ips[i], node->ip_address, 63);
+                proposed_entry.storage_node_ports[i] = node->port;
+                proposed_entry.storage_nodes[i] = selected_nodes[i]; // Store node ID
             }
         }
-        entry->num_storage_nodes = num_selected;
-        entry->num_replicas = num_selected;
-        entry->state = FILE_STATE_ACTIVE;
+        proposed_entry.num_storage_nodes = num_selected;
+        proposed_entry.num_replicas = num_selected;
+        proposed_entry.primary_node_idx = 0;
 
         // 4. Propose to Paxos for consensus
         uint8_t *serialized = nullptr;
         size_t serialized_len = 0;
         
-        if (metadata_serialize(entry, &serialized, &serialized_len) == 0) {
+        if (metadata_serialize(&proposed_entry, &serialized, &serialized_len) == 0) {
             int result = paxos_propose(g_paxos, serialized, serialized_len);
             free(serialized);
             
@@ -255,29 +278,41 @@ public:
 
         pthread_mutex_lock(&g_coordinator_lock);
 
-        // Create metadata entry for directory
+        // Build metadata entry for directory
         std::string dir_id = generate_file_id(full_path);
-        metadata_entry_t *entry = metadata_create_entry(
-            g_metadata, full_path.c_str(),
-            S_IFDIR | mode, getuid(), getgid());
-        
-        if (!entry) {
-            pthread_mutex_unlock(&g_coordinator_lock);
-            response->set_status_code(-ENOMEM);
-            response->set_error_message("Failed to create metadata entry");
-            return Status::OK;
-        }
-
-        strncpy(entry->file_id, dir_id.c_str(), sizeof(entry->file_id) - 1);
-        entry->state = FILE_STATE_ACTIVE;
+        metadata_entry_t proposed_entry;
+        memset(&proposed_entry, 0, sizeof(proposed_entry));
+        strncpy(proposed_entry.file_id, dir_id.c_str(), sizeof(proposed_entry.file_id) - 1);
+        strncpy(proposed_entry.path, full_path.c_str(), sizeof(proposed_entry.path) - 1);
+        proposed_entry.mode = S_IFDIR | mode;
+        proposed_entry.uid = getuid();
+        proposed_entry.gid = getgid();
+        proposed_entry.state = FILE_STATE_ACTIVE;
+        proposed_entry.created_time = time(nullptr);
+        proposed_entry.modified_time = proposed_entry.created_time;
+        proposed_entry.accessed_time = proposed_entry.created_time;
+        proposed_entry.version = 1;
+        proposed_entry.stripe_size = 4194304;
 
         // Propose to Paxos
         uint8_t *serialized = nullptr;
         size_t serialized_len = 0;
         
-        if (metadata_serialize(entry, &serialized, &serialized_len) == 0) {
-            paxos_propose(g_paxos, serialized, serialized_len);
-            free(serialized);
+        if (metadata_serialize(&proposed_entry, &serialized, &serialized_len) != 0) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-EIO);
+            response->set_error_message("Failed to serialize metadata");
+            return Status::OK;
+        }
+
+        int paxos_result = paxos_propose(g_paxos, serialized, serialized_len);
+        free(serialized);
+
+        if (paxos_result != 0) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-EIO);
+            response->set_error_message("Paxos consensus failed");
+            return Status::OK;
         }
 
         pthread_mutex_unlock(&g_coordinator_lock);
@@ -315,7 +350,7 @@ public:
             return Status::OK;
         }
 
-        // 2. Write to primary storage node
+        // 2. Write to storage replicas and require quorum success
         if (entry->num_storage_nodes == 0) {
             pthread_mutex_unlock(&g_coordinator_lock);
             response->set_status_code(-ENODEV);
@@ -324,46 +359,65 @@ public:
             return Status::OK;
         }
 
-        // Write to primary node (index 0)
-        uint32_t primary_node = entry->storage_nodes[0];
-        
-        printf("[Frontend DEBUG] entry->num_storage_nodes=%u, storage_nodes[0]=%u, storage_nodes[1]=%u, storage_nodes[2]=%u\n",
-               entry->num_storage_nodes, entry->storage_nodes[0], entry->storage_nodes[1], entry->storage_nodes[2]);
-        
-        if (primary_node == 0) {
-            pthread_mutex_unlock(&g_coordinator_lock);
-            response->set_status_code(-ENODEV);
-            response->set_error_message("Primary storage node not set");
-            response->set_bytes_written(0);
-            printf("[Frontend] ERROR: primary_node is 0 (not initialized)\n");
-            return Status::OK;
-        }
-        
-        printf("[Frontend] Writing to storage node %u (%s:%u)\n", 
-               primary_node, entry->storage_node_ips[0], entry->storage_node_ports[0]);
+        uint32_t quorum_required = (entry->num_storage_nodes / 2) + 1;
+        uint32_t success_count = 0;
+        uint64_t bytes_written = 0;
 
-        storage_response_t storage_resp;
-        int result = storage_interface_write(
-            g_storage, primary_node, entry->file_id,
-            offset, (const uint8_t*)data.data(), data.size(),
-            &storage_resp);
-
-        if (result == 0 && storage_resp.status == 0) {
-            // Update metadata size
-            if (offset + data.size() > entry->size) {
-                entry->size = offset + data.size();
-                entry->modified_time = time(nullptr);
-                metadata_update_entry(g_metadata, entry);
+        for (uint32_t i = 0; i < entry->num_storage_nodes; i++) {
+            uint32_t node_id = entry->storage_nodes[i];
+            if (node_id == 0) {
+                continue;
             }
 
-            response->set_bytes_written(storage_resp.bytes_transferred);
+            storage_response_t replica_resp;
+            int write_result = storage_interface_write(
+                g_storage, node_id, entry->file_id,
+                offset, (const uint8_t *)data.data(), data.size(),
+                &replica_resp);
+
+            if (write_result == 0 && replica_resp.status == 0) {
+                success_count++;
+                bytes_written = replica_resp.bytes_transferred;
+            }
+        }
+
+        if (success_count >= quorum_required) {
+            metadata_entry_t proposed_entry;
+            memset(&proposed_entry, 0, sizeof(proposed_entry));
+            size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+            memcpy(&proposed_entry, entry, copy_len);
+
+            if (offset + data.size() > proposed_entry.size) {
+                proposed_entry.size = offset + data.size();
+            }
+            proposed_entry.modified_time = time(nullptr);
+            proposed_entry.version = entry->version + 1;
+
+            uint8_t *serialized = nullptr;
+            size_t serialized_len = 0;
+            bool metadata_committed = false;
+            if (metadata_serialize(&proposed_entry, &serialized, &serialized_len) == 0) {
+                metadata_committed = (paxos_propose(g_paxos, serialized, serialized_len) == 0);
+                free(serialized);
+            }
+
+            if (!metadata_committed) {
+                response->set_bytes_written(0);
+                response->set_status_code(-EIO);
+                response->set_error_message("Write quorum reached but metadata consensus failed");
+                printf("[Frontend] Write failed: metadata consensus failure\n");
+                pthread_mutex_unlock(&g_coordinator_lock);
+                return Status::OK;
+            }
+
+            response->set_bytes_written(bytes_written);
             response->set_status_code(0);
-            printf("[Frontend] Write success: %lu bytes\n", storage_resp.bytes_transferred);
+            printf("[Frontend] Write success: quorum %u/%u\n", success_count, entry->num_storage_nodes);
         } else {
             response->set_bytes_written(0);
-            response->set_status_code(storage_resp.status);
-            response->set_error_message(storage_resp.error_msg);
-            printf("[Frontend] Write failed: %s\n", storage_resp.error_msg);
+            response->set_status_code(-EIO);
+            response->set_error_message("Write quorum not reached");
+            printf("[Frontend] Write failed: quorum %u/%u\n", success_count, entry->num_storage_nodes);
         }
 
         pthread_mutex_unlock(&g_coordinator_lock);
@@ -452,31 +506,50 @@ public:
             return Status::OK;
         }
 
-        uint32_t primary_node = entry->storage_nodes[0];
-        
-        printf("[Frontend] Reading from storage node %u (%s:%u)\n", 
-               primary_node, entry->storage_node_ips[0], entry->storage_node_ports[0]);
+        uint32_t quorum_required = (entry->num_storage_nodes / 2) + 1;
+        std::unordered_map<std::string, uint32_t> value_counts;
+        std::string quorum_value;
+        bool quorum_found = false;
 
-        storage_response_t storage_resp;
-        int result = storage_interface_read(
-            g_storage, primary_node, entry->file_id,
-            offset, size, &storage_resp);
-
-        if (result == 0 && storage_resp.status == 0) {
-            response->set_data(storage_resp.data, storage_resp.data_len);
-            response->set_bytes_read(storage_resp.data_len);
-            response->set_status_code(0);
-            printf("[Frontend] Get success: %zu bytes\n", storage_resp.data_len);
-            
-            // Free the data allocated by storage_interface_read
-            if (storage_resp.data) {
-                free(storage_resp.data);
+        for (uint32_t i = 0; i < entry->num_storage_nodes; i++) {
+            uint32_t node_id = entry->storage_nodes[i];
+            if (node_id == 0) {
+                continue;
             }
+
+            storage_response_t replica_resp{};
+            int read_result = storage_interface_read(
+                g_storage, node_id, entry->file_id,
+                offset, size, &replica_resp);
+
+            if (read_result == 0 && replica_resp.status == 0 && replica_resp.data) {
+                std::string payload((const char *)replica_resp.data, replica_resp.data_len);
+                uint32_t count = ++value_counts[payload];
+                if (count >= quorum_required) {
+                    quorum_value = payload;
+                    quorum_found = true;
+                }
+            }
+
+            if (replica_resp.data) {
+                free(replica_resp.data);
+            }
+
+            if (quorum_found) {
+                break;
+            }
+        }
+
+        if (quorum_found) {
+            response->set_data(quorum_value.data(), quorum_value.size());
+            response->set_bytes_read(quorum_value.size());
+            response->set_status_code(0);
+            printf("[Frontend] Get success: quorum %u/%u\n", quorum_required, entry->num_storage_nodes);
         } else {
             response->set_bytes_read(0);
-            response->set_status_code(storage_resp.status);
-            response->set_error_message(storage_resp.error_msg);
-            printf("[Frontend] Get failed: %s\n", storage_resp.error_msg);
+            response->set_status_code(-EIO);
+            response->set_error_message("Read quorum not reached");
+            printf("[Frontend] Get failed: read quorum not reached\n");
         }
 
         pthread_mutex_unlock(&g_coordinator_lock);
@@ -600,6 +673,9 @@ bool initialize_distributed_system(uint32_t node_id, uint16_t listen_port,
         return false;
     }
     printf("[Network] Started on port %u\n", listen_port);
+
+    paxos_set_broadcast_callback(g_paxos, paxos_broadcast_message, g_network);
+    paxos_set_proposal_timeout(g_paxos, 5000);
 
     // 5. Add peer metadata nodes
     for (int i = 0; i < num_peers; i++) {

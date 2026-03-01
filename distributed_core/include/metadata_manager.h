@@ -206,6 +206,14 @@ int metadata_serialize(const metadata_entry_t *entry, uint8_t **buffer, size_t *
 int metadata_deserialize(const uint8_t *buffer, size_t len, metadata_entry_t **entry);
 
 /**
+ * Apply a committed metadata entry to local state machine (no WAL append)
+ * @param mgr Metadata manager
+ * @param entry Committed metadata entry
+ * @return 0 on success, -1 on error
+ */
+int metadata_apply_entry(metadata_manager_t *mgr, const metadata_entry_t *entry);
+
+/**
  * Calculate CRC32 checksum
  */
 uint32_t metadata_crc32(const uint8_t *data, size_t len);

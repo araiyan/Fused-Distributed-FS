@@ -460,3 +460,66 @@ int metadata_deserialize(const uint8_t *buffer, size_t len, metadata_entry_t **e
     
     return 0;
 }
+
+int metadata_apply_entry(metadata_manager_t *mgr, const metadata_entry_t *entry) {
+    if (!mgr || !entry) {
+        return -1;
+    }
+
+    pthread_rwlock_wrlock(&mgr->map_lock);
+
+    metadata_hash_map_t *map = (metadata_hash_map_t *)mgr->hash_map;
+    uint32_t idx = hash_string(entry->file_id);
+    metadata_entry_node_t *node = map->buckets[idx];
+
+    while (node) {
+        if (strcmp(node->key, entry->file_id) == 0) {
+            pthread_rwlock_wrlock(&node->entry->lock);
+
+            uint64_t old_size = node->entry->size;
+            size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+            memcpy(node->entry, entry, copy_len);
+
+            pthread_rwlock_unlock(&node->entry->lock);
+
+            if (entry->size >= old_size) {
+                mgr->total_size += (entry->size - old_size);
+            } else {
+                mgr->total_size -= (old_size - entry->size);
+            }
+
+            pthread_rwlock_unlock(&mgr->map_lock);
+            return 0;
+        }
+        node = node->next;
+    }
+
+    metadata_entry_t *new_entry = (metadata_entry_t *)calloc(1, sizeof(metadata_entry_t));
+    if (!new_entry) {
+        pthread_rwlock_unlock(&mgr->map_lock);
+        return -1;
+    }
+
+    size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+    memcpy(new_entry, entry, copy_len);
+    pthread_rwlock_init(&new_entry->lock, NULL);
+
+    metadata_entry_node_t *new_node = (metadata_entry_node_t *)calloc(1, sizeof(metadata_entry_node_t));
+    if (!new_node) {
+        pthread_rwlock_destroy(&new_entry->lock);
+        free(new_entry);
+        pthread_rwlock_unlock(&mgr->map_lock);
+        return -1;
+    }
+
+    strncpy(new_node->key, new_entry->file_id, sizeof(new_node->key) - 1);
+    new_node->entry = new_entry;
+    new_node->next = map->buckets[idx];
+    map->buckets[idx] = new_node;
+
+    mgr->total_entries++;
+    mgr->total_size += new_entry->size;
+
+    pthread_rwlock_unlock(&mgr->map_lock);
+    return 0;
+}
