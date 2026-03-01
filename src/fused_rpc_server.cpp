@@ -36,13 +36,26 @@ using grpc::Status;
 std::string normalize_path(const std::string &path)
 {
     const std::string mount_prefix = "/mnt/fused";
-    if (path.find(mount_prefix) == 0)
+    std::string normalized = path;
+
+    if (normalized.find(mount_prefix) == 0)
     {
-        std::string normalized = path.substr(mount_prefix.length());
+        normalized = normalized.substr(mount_prefix.length());
         // If path was just "/mnt/fused", return "/"
         return normalized.empty() ? "/" : normalized;
     }
-    return path;
+
+    if (normalized.empty())
+    {
+        return "/";
+    }
+
+    if (normalized[0] != '/')
+    {
+        normalized.insert(normalized.begin(), '/');
+    }
+
+    return normalized;
 }
 
 class FileSystemServiceImpl final : public FileSystemService::Service

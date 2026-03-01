@@ -778,6 +778,13 @@ static void split_path(const char *path, char *parent_path, char *child_name)
 
     char *last_slash = strrchr(temp, '/');
 
+    if (!last_slash)
+    {
+        strcpy(parent_path, "/");
+        strcpy(child_name, temp);
+        return;
+    }
+
     if (last_slash == temp)
     {
         // Parent is root
