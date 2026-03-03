@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <cstring>
+#include <chrono>
 
 using fused::CreateRequest;
 using fused::CreateResponse;
@@ -31,6 +32,10 @@ class DistributedFileSystemClient {
 private:
     std::unique_ptr<FileSystemService::Stub> stub_;
 
+    static void set_deadline(ClientContext& context) {
+        context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(20));
+    }
+
 public:
     DistributedFileSystemClient(std::shared_ptr<Channel> channel)
         : stub_(FileSystemService::NewStub(channel)) {}
@@ -43,6 +48,7 @@ public:
 
         MkdirResponse response;
         ClientContext context;
+        set_deadline(context);
 
         Status status = stub_->Mkdir(&context, request, &response);
 
@@ -68,6 +74,7 @@ public:
 
         CreateResponse response;
         ClientContext context;
+        set_deadline(context);
 
         Status status = stub_->Create(&context, request, &response);
 
@@ -93,6 +100,7 @@ public:
 
         WriteResponse response;
         ClientContext context;
+        set_deadline(context);
 
         Status status = stub_->Write(&context, request, &response);
 
@@ -107,7 +115,7 @@ public:
         }
 
         std::cout << "✓ Wrote " << response.bytes_written() << " bytes to " << path << std::endl;
-        return response.bytes_written();
+        return 0;
     }
 
     int Read(const std::string& path, std::string& data_out, uint64_t offset = 0, uint64_t size = 0) {
@@ -118,6 +126,7 @@ public:
 
         GetResponse response;
         ClientContext context;
+        set_deadline(context);
 
         Status status = stub_->Get(&context, request, &response);
 
@@ -133,7 +142,7 @@ public:
 
         data_out = response.data();
         std::cout << "✓ Read " << response.bytes_read() << " bytes from " << path << std::endl;
-        return response.bytes_read();
+        return 0;
     }
 
     int ListDirectory(const std::string& path) {
@@ -142,6 +151,7 @@ public:
 
         ReadDirectoryResponse response;
         ClientContext context;
+        set_deadline(context);
 
         Status status = stub_->ReadDirectory(&context, request, &response);
 
@@ -171,8 +181,8 @@ void print_usage(const char* prog) {
     std::cout << "Commands:" << std::endl;
     std::cout << "  mkdir <parent_path> <dirname>              - Create directory" << std::endl;
     std::cout << "  create <parent_path> <filename>            - Create file" << std::endl;
-    std::cout << "  write <file_path> <text>                   - Write text to file" << std::endl;
-    std::cout << "  read <file_path>                           - Read file contents" << std::endl;
+    std::cout << "  write <file_path> <text> [offset]          - Write text to file" << std::endl;
+    std::cout << "  read <file_path> [offset] [size]           - Read file contents" << std::endl;
     std::cout << "  ls <directory_path>                        - List directory" << std::endl;
     std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
@@ -218,7 +228,11 @@ int main(int argc, char** argv) {
         }
         std::string path = argv[3];
         std::string text = argv[4];
-        return client.Write(path, text);
+        uint64_t offset = 0;
+        if (argc >= 6) {
+            offset = strtoull(argv[5], nullptr, 10);
+        }
+        return client.Write(path, text, offset);
     }
     else if (command == "read") {
         if (argc < 4) {
@@ -226,8 +240,16 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::string path = argv[3];
+        uint64_t offset = 0;
+        uint64_t size = 0;
+        if (argc >= 5) {
+            offset = strtoull(argv[4], nullptr, 10);
+        }
+        if (argc >= 6) {
+            size = strtoull(argv[5], nullptr, 10);
+        }
         std::string data;
-        int result = client.Read(path, data);
+        int result = client.Read(path, data, offset, size);
         if (result >= 0) {
             std::cout << "Content:" << std::endl;
             std::cout << data << std::endl;

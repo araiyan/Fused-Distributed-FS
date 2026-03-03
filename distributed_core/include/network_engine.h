@@ -59,6 +59,11 @@ typedef struct {
     peer_connection_t peers[MAX_PEERS];
     uint32_t num_peers;
     pthread_rwlock_t peers_lock;
+
+    // Inbound connections accepted from peers
+    int inbound_fds[MAX_PENDING_CONNECTIONS];
+    uint32_t num_inbound_fds;
+    pthread_mutex_t inbound_lock;
     
     // Event loop thread
     pthread_t event_thread;

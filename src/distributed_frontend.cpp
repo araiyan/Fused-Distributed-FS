@@ -14,6 +14,7 @@
 #include "filesystem.grpc.pb.h"
 #include <chrono>
 #include <unordered_map>
+#include <unordered_set>
 
 extern "C" {
 #include "../distributed_core/include/paxos.h"
@@ -53,6 +54,54 @@ static network_engine_t *g_network = nullptr;
 static storage_interface_t *g_storage = nullptr;
 static pthread_mutex_t g_coordinator_lock = PTHREAD_MUTEX_INITIALIZER;
 
+typedef struct metadata_entry_node {
+    char key[64];
+    metadata_entry_t *entry;
+    struct metadata_entry_node *next;
+} metadata_entry_node_t;
+
+#define FRONTEND_METADATA_HASH_MAP_SIZE 1024
+typedef struct {
+    metadata_entry_node_t *buckets[FRONTEND_METADATA_HASH_MAP_SIZE];
+} metadata_hash_map_t;
+
+std::string trim_trailing_slash(const std::string &path) {
+    if (path == "/") {
+        return path;
+    }
+    size_t end = path.size();
+    while (end > 1 && path[end - 1] == '/') {
+        end--;
+    }
+    return path.substr(0, end);
+}
+
+bool is_direct_child_path(const std::string &dir_path, const std::string &candidate,
+                          std::string &child_name_out) {
+    if (candidate.empty() || candidate == dir_path) {
+        return false;
+    }
+
+    std::string normalized_dir = trim_trailing_slash(dir_path);
+    std::string prefix = (normalized_dir == "/") ? "/" : (normalized_dir + "/");
+
+    if (candidate.rfind(prefix, 0) != 0) {
+        return false;
+    }
+
+    std::string remainder = candidate.substr(prefix.size());
+    if (remainder.empty()) {
+        return false;
+    }
+
+    if (remainder.find('/') != std::string::npos) {
+        return false;
+    }
+
+    child_name_out = remainder;
+    return true;
+}
+
 /**
  * Generate unique file ID using UUID
  */
@@ -72,6 +121,54 @@ std::string normalize_path(const std::string &path) {
         return "/" + path;
     }
     return path;
+}
+
+bool is_valid_name_component(const std::string &name) {
+    if (name.empty() || name == "." || name == "..") {
+        return false;
+    }
+    return name.find('/') == std::string::npos;
+}
+
+std::string join_path(const std::string &parent, const std::string &name) {
+    std::string normalized_parent = trim_trailing_slash(normalize_path(parent));
+    if (normalized_parent == "/") {
+        return "/" + name;
+    }
+    return normalized_parent + "/" + name;
+}
+
+bool path_is_existing_directory(const std::string &path) {
+    std::string normalized = trim_trailing_slash(normalize_path(path));
+    if (normalized == "/") {
+        return true;
+    }
+
+    metadata_entry_t *entry = metadata_lookup_by_path(g_metadata, normalized.c_str());
+    return entry && entry->state != FILE_STATE_DELETED && S_ISDIR(entry->mode);
+}
+
+bool commit_metadata_with_paxos(const metadata_entry_t *entry, const char *operation) {
+    if (!entry || !g_metadata) {
+        return false;
+    }
+
+    uint8_t *serialized = nullptr;
+    size_t serialized_len = 0;
+    if (metadata_serialize(entry, &serialized, &serialized_len) != 0) {
+        return false;
+    }
+
+    int paxos_result = paxos_propose(g_paxos, serialized, serialized_len);
+    free(serialized);
+
+    if (paxos_result != 0) {
+        printf("[Frontend] Paxos proposal failed during %s\n",
+               operation ? operation : "operation");
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -178,14 +275,31 @@ public:
                   CreateResponse *response) override {
         (void)context;
 
-        std::string parent_path = normalize_path(request->pathname());
+        std::string parent_path = trim_trailing_slash(normalize_path(request->pathname()));
         std::string filename = request->filename();
         mode_t mode = static_cast<mode_t>(request->mode());
 
+        if (!is_valid_name_component(filename)) {
+            response->set_status_code(-EINVAL);
+            response->set_error_message("Invalid filename");
+            return Status::OK;
+        }
+
+        if (!path_is_existing_directory(parent_path)) {
+            response->set_status_code(-ENOENT);
+            response->set_error_message("Parent directory not found");
+            return Status::OK;
+        }
+
         // Build full path
-        std::string full_path = parent_path;
-        if (full_path.back() != '/') full_path += "/";
-        full_path += filename;
+        std::string full_path = join_path(parent_path, filename);
+
+        metadata_entry_t *existing = metadata_lookup_by_path(g_metadata, full_path.c_str());
+        if (existing && existing->state != FILE_STATE_DELETED) {
+            response->set_status_code(-EEXIST);
+            response->set_error_message("File already exists");
+            return Status::OK;
+        }
 
         printf("[Frontend] Create: %s (mode=0%o)\n", full_path.c_str(), mode);
 
@@ -234,19 +348,11 @@ public:
         proposed_entry.primary_node_idx = 0;
 
         // 4. Propose to Paxos for consensus
-        uint8_t *serialized = nullptr;
-        size_t serialized_len = 0;
-        
-        if (metadata_serialize(&proposed_entry, &serialized, &serialized_len) == 0) {
-            int result = paxos_propose(g_paxos, serialized, serialized_len);
-            free(serialized);
-            
-            if (result != 0) {
-                pthread_mutex_unlock(&g_coordinator_lock);
-                response->set_status_code(-EIO);
-                response->set_error_message("Paxos consensus failed");
-                return Status::OK;
-            }
+        if (!commit_metadata_with_paxos(&proposed_entry, "create")) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-EIO);
+            response->set_error_message("Failed to commit metadata");
+            return Status::OK;
         }
 
         pthread_mutex_unlock(&g_coordinator_lock);
@@ -265,14 +371,31 @@ public:
                  MkdirResponse *response) override {
         (void)context;
 
-        std::string parent_path = normalize_path(request->pathname());
+        std::string parent_path = trim_trailing_slash(normalize_path(request->pathname()));
         std::string dirname = request->dirname();
         mode_t mode = static_cast<mode_t>(request->mode());
 
+        if (!is_valid_name_component(dirname)) {
+            response->set_status_code(-EINVAL);
+            response->set_error_message("Invalid directory name");
+            return Status::OK;
+        }
+
+        if (!path_is_existing_directory(parent_path)) {
+            response->set_status_code(-ENOENT);
+            response->set_error_message("Parent directory not found");
+            return Status::OK;
+        }
+
         // Build full path
-        std::string full_path = parent_path;
-        if (full_path.back() != '/') full_path += "/";
-        full_path += dirname;
+        std::string full_path = join_path(parent_path, dirname);
+
+        metadata_entry_t *existing = metadata_lookup_by_path(g_metadata, full_path.c_str());
+        if (existing && existing->state != FILE_STATE_DELETED) {
+            response->set_status_code(-EEXIST);
+            response->set_error_message("Directory already exists");
+            return Status::OK;
+        }
 
         printf("[Frontend] Mkdir: %s (mode=0%o)\n", full_path.c_str(), mode);
 
@@ -295,23 +418,10 @@ public:
         proposed_entry.stripe_size = 4194304;
 
         // Propose to Paxos
-        uint8_t *serialized = nullptr;
-        size_t serialized_len = 0;
-        
-        if (metadata_serialize(&proposed_entry, &serialized, &serialized_len) != 0) {
+        if (!commit_metadata_with_paxos(&proposed_entry, "mkdir")) {
             pthread_mutex_unlock(&g_coordinator_lock);
             response->set_status_code(-EIO);
-            response->set_error_message("Failed to serialize metadata");
-            return Status::OK;
-        }
-
-        int paxos_result = paxos_propose(g_paxos, serialized, serialized_len);
-        free(serialized);
-
-        if (paxos_result != 0) {
-            pthread_mutex_unlock(&g_coordinator_lock);
-            response->set_status_code(-EIO);
-            response->set_error_message("Paxos consensus failed");
+            response->set_error_message("Failed to commit metadata");
             return Status::OK;
         }
 
@@ -362,6 +472,11 @@ public:
         uint32_t quorum_required = (entry->num_storage_nodes / 2) + 1;
         uint32_t success_count = 0;
         uint64_t bytes_written = 0;
+        off_t write_offset = offset;
+
+        if (write_offset == 0 && entry->size > 0) {
+            write_offset = entry->size;
+        }
 
         for (uint32_t i = 0; i < entry->num_storage_nodes; i++) {
             uint32_t node_id = entry->storage_nodes[i];
@@ -372,7 +487,7 @@ public:
             storage_response_t replica_resp;
             int write_result = storage_interface_write(
                 g_storage, node_id, entry->file_id,
-                offset, (const uint8_t *)data.data(), data.size(),
+                write_offset, (const uint8_t *)data.data(), data.size(),
                 &replica_resp);
 
             if (write_result == 0 && replica_resp.status == 0) {
@@ -387,19 +502,13 @@ public:
             size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
             memcpy(&proposed_entry, entry, copy_len);
 
-            if (offset + data.size() > proposed_entry.size) {
-                proposed_entry.size = offset + data.size();
+            if (write_offset + data.size() > proposed_entry.size) {
+                proposed_entry.size = write_offset + data.size();
             }
             proposed_entry.modified_time = time(nullptr);
             proposed_entry.version = entry->version + 1;
 
-            uint8_t *serialized = nullptr;
-            size_t serialized_len = 0;
-            bool metadata_committed = false;
-            if (metadata_serialize(&proposed_entry, &serialized, &serialized_len) == 0) {
-                metadata_committed = (paxos_propose(g_paxos, serialized, serialized_len) == 0);
-                free(serialized);
-            }
+            bool metadata_committed = commit_metadata_with_paxos(&proposed_entry, "write");
 
             if (!metadata_committed) {
                 response->set_bytes_written(0);
@@ -454,13 +563,22 @@ public:
                     self_id = atoi(node_id_env);
                 }
 
-                for (int peer_id = 1; peer_id <= 3; peer_id++) {
+                int total_nodes = 3;
+                const char *total_nodes_env = getenv("TOTAL_NODES");
+                if (total_nodes_env) {
+                    int parsed_total_nodes = atoi(total_nodes_env);
+                    if (parsed_total_nodes > 0) {
+                        total_nodes = parsed_total_nodes;
+                    }
+                }
+
+                for (int peer_id = 1; peer_id <= total_nodes; peer_id++) {
                     if (peer_id == self_id) {
                         continue;
                     }
 
                     std::string peer_addr = "frontend-" + std::to_string(peer_id) +
-                                            ":6005" + std::to_string(peer_id);
+                                            ":" + std::to_string(60050 + peer_id);
 
                     auto channel = grpc::CreateChannel(peer_addr,
                         grpc::InsecureChannelCredentials());
@@ -564,46 +682,56 @@ public:
                         ReadDirectoryResponse *response) override {
         (void)context;
 
-        std::string path = normalize_path(request->pathname());
+        std::string path = trim_trailing_slash(normalize_path(request->pathname()));
 
         printf("[Frontend] ReadDirectory: path=%s\n", path.c_str());
 
         pthread_mutex_lock(&g_coordinator_lock);
 
-        if (path == "/") {
-            response->set_status_code(0);
-            printf("[Frontend] ReadDirectory success: 0 entries (root)\n");
-            pthread_mutex_unlock(&g_coordinator_lock);
-            return Status::OK;
+        std::string dir_path = trim_trailing_slash(path);
+
+        if (dir_path != "/") {
+            metadata_entry_t *dir_entry = metadata_lookup_by_path(g_metadata, dir_path.c_str());
+            if (!dir_entry) {
+                pthread_mutex_unlock(&g_coordinator_lock);
+                response->set_status_code(-ENOENT);
+                response->set_error_message("Directory not found");
+                return Status::OK;
+            }
+
+            if (!S_ISDIR(dir_entry->mode)) {
+                pthread_mutex_unlock(&g_coordinator_lock);
+                response->set_status_code(-ENOTDIR);
+                response->set_error_message("Not a directory");
+                return Status::OK;
+            }
         }
 
-        // Lookup directory metadata
-        metadata_entry_t *dir_entry = metadata_lookup_by_path(g_metadata, path.c_str());
-        if (!dir_entry) {
-            pthread_mutex_unlock(&g_coordinator_lock);
-            response->set_status_code(-ENOENT);
-            response->set_error_message("Directory not found");
-            return Status::OK;
-        }
-
-        if (!S_ISDIR(dir_entry->mode)) {
-            pthread_mutex_unlock(&g_coordinator_lock);
-            response->set_status_code(-ENOTDIR);
-            response->set_error_message("Not a directory");
-            return Status::OK;
-        }
-
-        // List all entries with matching parent path
-        // Note: This is a simplified implementation
-        // In production, we'd maintain a parent-child relationship in metadata
-        
-        // For now, scan all metadata entries and filter by parent path
-        // This is inefficient but works for demonstration
+        metadata_hash_map_t *map = (metadata_hash_map_t *)g_metadata->hash_map;
+        std::unordered_set<std::string> seen_entries;
         int entry_count = 0;
-        
-        // Iterate through hash map (simplified - would need proper hash map iteration)
-        // For now, just return success with empty listing
-        
+
+        for (int i = 0; i < FRONTEND_METADATA_HASH_MAP_SIZE; i++) {
+            metadata_entry_node_t *node = map->buckets[i];
+            while (node) {
+                metadata_entry_t *entry = node->entry;
+                if (entry && entry->state != FILE_STATE_DELETED) {
+                    std::string child_name;
+                    std::string entry_path = trim_trailing_slash(entry->path);
+                    if (is_direct_child_path(dir_path, entry_path, child_name) &&
+                        seen_entries.insert(child_name).second) {
+                        FileEntry *resp_entry = response->add_entries();
+                        resp_entry->set_name(child_name);
+                        resp_entry->set_is_directory(S_ISDIR(entry->mode));
+                        resp_entry->set_size(entry->size);
+                        resp_entry->set_mtime(entry->modified_time);
+                        entry_count++;
+                    }
+                }
+                node = node->next;
+            }
+        }
+
         response->set_status_code(0);
         printf("[Frontend] ReadDirectory success: %d entries\n", entry_count);
 
@@ -675,7 +803,7 @@ bool initialize_distributed_system(uint32_t node_id, uint16_t listen_port,
     printf("[Network] Started on port %u\n", listen_port);
 
     paxos_set_broadcast_callback(g_paxos, paxos_broadcast_message, g_network);
-    paxos_set_proposal_timeout(g_paxos, 5000);
+    paxos_set_proposal_timeout(g_paxos, 1500);
 
     // 5. Add peer metadata nodes
     for (int i = 0; i < num_peers; i++) {

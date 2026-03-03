@@ -8,11 +8,82 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
+#include <netdb.h>
 #include <poll.h>
 
 #define MAGIC_NUMBER 0xFEEDFACE
 #define MAX_EVENTS 64
 #define MAX_POLL_FDS 128
+
+static void network_remove_inbound_fd(network_engine_t *engine, int fd) {
+    if (!engine || fd < 0) {
+        return;
+    }
+
+    pthread_mutex_lock(&engine->inbound_lock);
+    for (uint32_t i = 0; i < engine->num_inbound_fds; i++) {
+        if (engine->inbound_fds[i] == fd) {
+            for (uint32_t j = i; j + 1 < engine->num_inbound_fds; j++) {
+                engine->inbound_fds[j] = engine->inbound_fds[j + 1];
+            }
+            engine->num_inbound_fds--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&engine->inbound_lock);
+}
+
+static int network_connect_peer(peer_connection_t *peer) {
+    if (!peer) {
+        return -1;
+    }
+
+    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_fd < 0) {
+        return -1;
+    }
+
+    struct sockaddr_in peer_addr;
+    memset(&peer_addr, 0, sizeof(peer_addr));
+    peer_addr.sin_family = AF_INET;
+    peer_addr.sin_port = htons(peer->port);
+
+    int resolved = 0;
+    struct addrinfo hints;
+    struct addrinfo *result = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    int gai_result = getaddrinfo(peer->ip_address, NULL, &hints, &result);
+    if (gai_result == 0 && result) {
+        struct sockaddr_in *resolved_addr = (struct sockaddr_in *)result->ai_addr;
+        peer_addr.sin_addr = resolved_addr->sin_addr;
+        resolved = 1;
+        freeaddrinfo(result);
+    } else if (inet_pton(AF_INET, peer->ip_address, &peer_addr.sin_addr) == 1) {
+        resolved = 1;
+    }
+
+    if (!resolved) {
+        close(sock_fd);
+        return -1;
+    }
+
+    if (connect(sock_fd, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) != 0) {
+        close(sock_fd);
+        return -1;
+    }
+
+    network_set_nonblocking(sock_fd);
+    network_set_socket_options(sock_fd);
+
+    peer->socket_fd = sock_fd;
+    peer->connected = true;
+    peer->last_heartbeat = time(NULL);
+
+    return 0;
+}
 
 /* Set socket to non-blocking mode */
 int network_set_nonblocking(int fd) {
@@ -72,6 +143,17 @@ static void *network_event_loop(void *arg) {
             }
         }
         pthread_rwlock_unlock(&engine->peers_lock);
+
+        // Add inbound accepted sockets
+        pthread_mutex_lock(&engine->inbound_lock);
+        for (uint32_t i = 0; i < engine->num_inbound_fds && nfds < MAX_POLL_FDS; i++) {
+            if (engine->inbound_fds[i] >= 0) {
+                poll_fds[nfds].fd = engine->inbound_fds[i];
+                poll_fds[nfds].events = POLLIN;
+                nfds++;
+            }
+        }
+        pthread_mutex_unlock(&engine->inbound_lock);
         
         // Poll with 1 second timeout
         int ret = poll(poll_fds, nfds, 1000);
@@ -97,9 +179,20 @@ static void *network_event_loop(void *arg) {
             } else {
                 network_set_nonblocking(client_fd);
                 network_set_socket_options(client_fd);
+
+                pthread_mutex_lock(&engine->inbound_lock);
+                if (engine->num_inbound_fds < MAX_PENDING_CONNECTIONS) {
+                    engine->inbound_fds[engine->num_inbound_fds++] = client_fd;
+                } else {
+                    close(client_fd);
+                    client_fd = -1;
+                }
+                pthread_mutex_unlock(&engine->inbound_lock);
                 
-                printf("Accepted connection from %s:%d\n",
-                       inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                if (client_fd >= 0) {
+                    printf("Accepted connection from %s:%d\n",
+                           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                }
             }
         }
         
@@ -113,6 +206,9 @@ static void *network_event_loop(void *arg) {
                     if (bytes_read == 0 || (bytes_read < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
                         // Connection closed or error
                         close(client_fd);
+
+                        network_remove_inbound_fd(engine, client_fd);
+
                         // Mark peer as disconnected
                         pthread_rwlock_wrlock(&engine->peers_lock);
                         for (uint32_t j = 0; j < engine->num_peers; j++) {
@@ -168,8 +264,10 @@ network_engine_t *network_engine_init(uint32_t node_id, uint16_t listen_port,
     engine->running = false;
     engine->message_handler = handler;
     engine->handler_context = ctx;
+    engine->num_inbound_fds = 0;
     
     pthread_rwlock_init(&engine->peers_lock, NULL);
+    pthread_mutex_init(&engine->inbound_lock, NULL);
     
     for (int i = 0; i < MAX_PEERS; i++) {
         engine->peers[i].connected = false;
@@ -198,8 +296,17 @@ void network_engine_destroy(network_engine_t *engine) {
         }
         pthread_mutex_destroy(&engine->peers[i].send_lock);
     }
+
+    pthread_mutex_lock(&engine->inbound_lock);
+    for (uint32_t i = 0; i < engine->num_inbound_fds; i++) {
+        if (engine->inbound_fds[i] >= 0) {
+            close(engine->inbound_fds[i]);
+        }
+    }
+    pthread_mutex_unlock(&engine->inbound_lock);
     
     pthread_rwlock_destroy(&engine->peers_lock);
+    pthread_mutex_destroy(&engine->inbound_lock);
     
     free(engine);
 }
@@ -287,25 +394,8 @@ int network_engine_add_peer(network_engine_t *engine, uint32_t node_id,
     peer->socket_fd = -1;
     
     // Attempt to connect
-    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_fd >= 0) {
-        struct sockaddr_in peer_addr;
-        memset(&peer_addr, 0, sizeof(peer_addr));
-        peer_addr.sin_family = AF_INET;
-        peer_addr.sin_port = htons(port);
-        inet_pton(AF_INET, ip_address, &peer_addr.sin_addr);
-        
-        if (connect(sock_fd, (struct sockaddr *)&peer_addr, sizeof(peer_addr)) == 0) {
-            network_set_nonblocking(sock_fd);
-            network_set_socket_options(sock_fd);
-            peer->socket_fd = sock_fd;
-            peer->connected = true;
-            peer->last_heartbeat = time(NULL);
-            
-            printf("Connected to peer %u at %s:%d\n", node_id, ip_address, port);
-        } else {
-            close(sock_fd);
-        }
+    if (network_connect_peer(peer) == 0) {
+        printf("Connected to peer %u at %s:%d\n", node_id, ip_address, port);
     }
     
     engine->num_peers++;
@@ -321,7 +411,7 @@ int network_engine_send(network_engine_t *engine, uint32_t peer_id,
         return -1;
     }
     
-    pthread_rwlock_rdlock(&engine->peers_lock);
+    pthread_rwlock_wrlock(&engine->peers_lock);
     
     peer_connection_t *peer = NULL;
     for (uint32_t i = 0; i < engine->num_peers; i++) {
@@ -331,7 +421,19 @@ int network_engine_send(network_engine_t *engine, uint32_t peer_id,
         }
     }
     
-    if (!peer || !peer->connected) {
+    if (!peer) {
+        pthread_rwlock_unlock(&engine->peers_lock);
+        return -1;
+    }
+
+    if (!peer->connected || peer->socket_fd < 0) {
+        if (network_connect_peer(peer) != 0) {
+            pthread_rwlock_unlock(&engine->peers_lock);
+            return -1;
+        }
+    }
+
+    if (!peer->connected) {
         pthread_rwlock_unlock(&engine->peers_lock);
         return -1;
     }
@@ -372,6 +474,13 @@ int network_engine_send(network_engine_t *engine, uint32_t peer_id,
     
     if (sent < 0) {
         perror("send failed");
+        pthread_rwlock_wrlock(&engine->peers_lock);
+        if (peer->socket_fd >= 0) {
+            close(peer->socket_fd);
+        }
+        peer->socket_fd = -1;
+        peer->connected = false;
+        pthread_rwlock_unlock(&engine->peers_lock);
         return -1;
     }
     
