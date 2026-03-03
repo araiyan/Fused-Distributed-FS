@@ -472,6 +472,7 @@ public:
         uint32_t quorum_required = (entry->num_storage_nodes / 2) + 1;
         uint32_t success_count = 0;
         uint64_t bytes_written = 0;
+        uint64_t original_size = entry->size;
         off_t write_offset = offset;
 
         if (write_offset == 0 && entry->size > 0) {
@@ -511,9 +512,25 @@ public:
             bool metadata_committed = commit_metadata_with_paxos(&proposed_entry, "write");
 
             if (!metadata_committed) {
+                bool rollback_safe = (original_size == 0 && write_offset == 0);
+                if (rollback_safe) {
+                    for (uint32_t i = 0; i < entry->num_storage_nodes; i++) {
+                        uint32_t node_id = entry->storage_nodes[i];
+                        if (node_id == 0) {
+                            continue;
+                        }
+                        storage_response_t cleanup_resp{};
+                        (void)storage_interface_delete(g_storage, node_id, entry->file_id, &cleanup_resp);
+                    }
+                    printf("[Frontend] Write rollback attempted on replicas for %s\n", path.c_str());
+                }
+
                 response->set_bytes_written(0);
                 response->set_status_code(-EIO);
-                response->set_error_message("Write quorum reached but metadata consensus failed");
+                response->set_error_message(
+                    rollback_safe
+                        ? "Write quorum reached but metadata consensus failed (rollback attempted)"
+                        : "Write quorum reached but metadata consensus failed");
                 printf("[Frontend] Write failed: metadata consensus failure\n");
                 pthread_mutex_unlock(&g_coordinator_lock);
                 return Status::OK;

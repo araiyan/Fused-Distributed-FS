@@ -92,6 +92,7 @@ paxos_node_t *paxos_init(uint32_t node_id, uint32_t total_nodes,
     
     node->highest_proposal_seen = 0;
     node->highest_sequence_committed = 0;
+    node->highest_sequence_persisted = 0;
     node->next_sequence_number = 1;
     node->last_accepted_proposal = 0;
     node->proposal_timeout_ms = 3000;
@@ -245,6 +246,12 @@ int paxos_propose(paxos_node_t *node, void *value, size_t value_len) {
         return -1;
     }
 
+    pthread_mutex_lock(&node->state_lock);
+    if (sequence > node->highest_sequence_persisted) {
+        node->highest_sequence_persisted = sequence;
+    }
+    pthread_mutex_unlock(&node->state_lock);
+
     pthread_mutex_lock(&proposal->lock);
     proposal->accept_count = 1; // Count self after local accept persistence
     pthread_mutex_unlock(&proposal->lock);
@@ -358,12 +365,13 @@ int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg,
                 node->last_accepted_proposal = msg->proposal_id;
                 
                 // Persist to WAL before acknowledging
-                if (node->persist_callback) {
-                    if (node->persist_callback(msg->sequence_number, msg->value, 
+                if (node->persist_callback && msg->sequence_number > node->highest_sequence_persisted) {
+                    if (node->persist_callback(msg->sequence_number, msg->value,
                                               msg->value_len) != 0) {
                         pthread_mutex_unlock(&node->state_lock);
                         return -1;
                     }
+                    node->highest_sequence_persisted = msg->sequence_number;
                 }
                 
                 *response = (paxos_message_t *)calloc(1, sizeof(paxos_message_t));
@@ -401,6 +409,19 @@ int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg,
                                                node->active_proposals[i].proposed_value,
                                                node->active_proposals[i].value_len);
                         }
+
+                        if (node->broadcast_callback) {
+                            paxos_message_t learn_msg;
+                            memset(&learn_msg, 0, sizeof(learn_msg));
+                            learn_msg.phase = PAXOS_PHASE_LEARN;
+                            learn_msg.proposal_id = node->active_proposals[i].proposal_id;
+                            learn_msg.sequence_number = node->active_proposals[i].sequence_number;
+                            learn_msg.sender_id = node->node_id;
+                            learn_msg.value = node->active_proposals[i].proposed_value;
+                            learn_msg.value_len = node->active_proposals[i].value_len;
+                            learn_msg.accepted_id = node->active_proposals[i].proposal_id;
+                            (void)node->broadcast_callback(&learn_msg, node->broadcast_context);
+                        }
                         
                         pthread_cond_broadcast(&node->active_proposals[i].quorum_reached);
                     }
@@ -414,8 +435,9 @@ int paxos_handle_message(paxos_node_t *node, const paxos_message_t *msg,
         case PAXOS_PHASE_LEARN:
             // Learner receives committed value
             if (msg->sequence_number > node->highest_sequence_committed) {
-                if (node->persist_callback) {
+                if (node->persist_callback && msg->sequence_number > node->highest_sequence_persisted) {
                     node->persist_callback(msg->sequence_number, msg->value, msg->value_len);
+                    node->highest_sequence_persisted = msg->sequence_number;
                 }
                 if (node->apply_callback) {
                     node->apply_callback(msg->sequence_number, msg->value, msg->value_len);

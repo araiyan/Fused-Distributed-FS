@@ -61,6 +61,7 @@ typedef struct {
     // Current Paxos state
     uint64_t highest_proposal_seen;
     uint64_t highest_sequence_committed;
+    uint64_t highest_sequence_persisted;
     uint64_t next_sequence_number;
     uint64_t last_accepted_proposal;
     
