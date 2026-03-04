@@ -45,3 +45,7 @@ mount/
 # Protobuf generated files
 proto/*.pb.h
 proto/*.pb.cc
+
+# Benchmark Plot Generation files
+benchmarks/*.png
+benchmarks/*.csv

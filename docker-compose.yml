@@ -9,6 +9,7 @@ services:
       - /dev/fuse
     cap_add:
       - SYS_ADMIN
+    shm_size: '4gb'
     environment:
       - FUSED_FOREGROUND=0
     volumes:

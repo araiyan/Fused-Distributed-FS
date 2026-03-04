@@ -7,10 +7,10 @@
 
 set -e
 
-# Configuration
+# Configuration - USE ABSOLUTE PATHS
 FUSE_MOUNT="/mnt/fused"
 TMPFS_MOUNT="/dev/shm/benchmark_test"
-OUTPUT_CSV="./benchmark_results.csv"
+OUTPUT_CSV="/app/benchmarks/benchmark_results.csv"
 
 # Test parameters (YouTube Shorts workload)
 NUM_SMALL_FILES=1000      # For file creation test
@@ -62,7 +62,7 @@ record_result() {
 cleanup_test_dir() {
     local dir=$1
     log "Cleaning up $dir"
-    rm -rf $dir/*
+    rm -rf $dir/* 2>/dev/null || true
     sync
     sleep 1
 }
@@ -151,7 +151,7 @@ test_file_creation() {
     local start_time=$(date +%s.%N)
     
     for i in $(seq 1 $NUM_SMALL_FILES); do
-        touch $test_dir/file_$i.txt
+        touch $test_dir/file_$i.txt 2>/dev/null
     done
     
     sync
@@ -368,7 +368,7 @@ main() {
     log "Results saved to: $OUTPUT_CSV"
     log ""
     log "To generate graphs, run:"
-    log "  python3 plot_results.py"
+    log "  python3 /app/benchmarks/plot_results.py"
 }
 
 # Run main
