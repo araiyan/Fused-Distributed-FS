@@ -16,7 +16,13 @@ RUN apt-get update && apt-get install -y \
     libprotobuf-dev \
     protobuf-compiler \
     protobuf-compiler-grpc \
+    python3 \
+    python3-pip \
+    bc \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages for benchmarking
+RUN pip3 install pandas matplotlib numpy 
 
 WORKDIR /app
 
@@ -24,10 +30,14 @@ COPY include/ /app/include/
 COPY src/ /app/src/
 COPY proto/ /app/proto/
 COPY tests/ /app/tests/
+COPY benchmarks/ /app/benchmarks/
 COPY Makefile /app/
 COPY scripts/ /app/scripts/
 
 RUN make clean && make all && make install
+
+# Make benchmark scripts executable
+RUN chmod +x /app/benchmarks/micro_bench.sh /app/benchmarks/plot_results.py
 
 # Create mount point
 RUN mkdir -p /mnt/fused
