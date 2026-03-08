@@ -1,0 +1,59 @@
+services:
+  storage-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.storage
+    container_name: storage-node
+    hostname: storage-node
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - NODE_ID=${NODE_ID}
+      - STORAGE_PORT=${STORAGE_PORT:-9000}
+      - GRPC_PORT=${GRPC_PORT:-50051}
+      - RPC_PORT=${GRPC_PORT:-50051}
+    ports:
+      - "${PUBLIC_STORAGE_TCP_PORT:-9000}:9000"
+      - "${PUBLIC_STORAGE_GRPC_PORT:-50051}:50051"
+    networks:
+      - distributed-fs-net
+    volumes:
+      - storage-data:/data
+    restart: unless-stopped
+
+  frontend-node:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: frontend-node
+    hostname: frontend-node
+    environment:
+      - NODE_ID=${NODE_ID}
+      - LISTEN_PORT=${LISTEN_PORT:-8001}
+      - TOTAL_NODES=${TOTAL_NODES:-3}
+      - PEER_NODES=${PEER_NODES}
+      - FRONTEND_GRPC_PORT=${FRONTEND_GRPC_PORT:-60051}
+      - STORAGE_NODES=${STORAGE_NODES}
+    ports:
+      - "${PUBLIC_FRONTEND_GRPC_PORT:-60051}:60051"
+      - "${PUBLIC_FRONTEND_P2P_PORT:-8001}:8001"
+    depends_on:
+      - storage-node
+    networks:
+      - distributed-fs-net
+    volumes:
+      - frontend-wal:/tmp/frontend_wal
+    restart: unless-stopped
+
+volumes:
+  storage-data:
+    driver: local
+  frontend-wal:
+    driver: local
+
+networks:
+  distributed-fs-net:
+    driver: bridge

@@ -78,6 +78,17 @@ docker build -t fused-fs:latest .
 
 ### Docker Usage
 
+### Deploy Across 3 AWS EC2 Nodes
+
+For geographically distributed deployment (3 Paxos frontend nodes across 3 EC2 instances), use:
+
+- `docker-compose-ec2.yml`
+- `deploy/ec2/.env.node.template`
+- `scripts/deploy_ec2_node.sh`
+- `scripts/remote_client.sh`
+
+Full guide: `DISTRIBUTED-AWS-EC2-DEPLOYMENT.md`
+
 #### Option 1: Docker Compose (Recommended)
 
 ```bash
