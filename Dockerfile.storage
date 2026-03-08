@@ -37,6 +37,7 @@ EXPOSE 9000 50051
 
 # Startup script
 COPY start-storage-node.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/start-storage-node.sh
+RUN sed -i 's/\r$//' /usr/local/bin/start-storage-node.sh && \
+    chmod +x /usr/local/bin/start-storage-node.sh
 
 CMD ["/usr/local/bin/start-storage-node.sh"]

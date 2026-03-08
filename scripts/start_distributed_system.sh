@@ -3,10 +3,11 @@
 
 set -e
 
-echo "========================================="
-echo " Building Distributed Filesystem"
-echo "========================================="
-echo ""
+# Step 1: Build distributed core library
+cd "$(dirname "$0")/.."
+source ./scripts/_common.sh
+
+print_banner "Building Distributed Filesystem"
 
 # Step 1: Build distributed core library
 echo "[1/4] Building distributed core..."
@@ -26,13 +27,13 @@ echo ""
 
 # Step 3: Build Docker images
 echo "[3/4] Building Docker images..."
-docker-compose -f docker-compose-full.yml build
+compose build
 echo "✓ Docker images built"
 echo ""
 
 # Step 4: Start all containers
 echo "[4/4] Starting all containers..."
-docker-compose -f docker-compose-full.yml up -d
+compose up -d
 echo "✓ All containers started"
 echo ""
 
@@ -45,7 +46,7 @@ echo ""
 echo "========================================="
 echo " Container Status"
 echo "========================================="
-docker-compose -f docker-compose-full.yml ps
+compose ps
 echo ""
 
 echo "========================================="
@@ -58,14 +59,14 @@ echo "  Storage Nodes: 3 nodes (ports 50051-50053)"
 echo "  Frontend Coordinators: 3 nodes (ports 60051-60053)"
 echo ""
 echo "To run tests:"
-echo "  docker-compose -f docker-compose-full.yml --profile test up -d test-client"
+echo "  docker compose -f docker-compose-full.yml --profile test up -d test-client"
 echo "  docker exec -it test-client bash"
 echo "  ./tests/distributed_test.sh frontend-1:60051"
 echo ""
 echo "To view logs:"
-echo "  docker-compose -f docker-compose-full.yml logs -f frontend-1"
-echo "  docker-compose -f docker-compose-full.yml logs -f storage-node-1"
+echo "  docker compose -f docker-compose-full.yml logs -f frontend-1"
+echo "  docker compose -f docker-compose-full.yml logs -f storage-node-1"
 echo ""
 echo "To stop:"
-echo "  docker-compose -f docker-compose-full.yml down"
+echo "  docker compose -f docker-compose-full.yml down"
 echo ""

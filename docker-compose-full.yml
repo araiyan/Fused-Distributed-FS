@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ============================================================================
   # Metadata Cluster (Paxos-based consensus for file metadata)

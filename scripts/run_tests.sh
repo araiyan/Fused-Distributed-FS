@@ -3,15 +3,15 @@
 
 FRONTEND_ADDR="${1:-frontend-1:60051}"
 
-echo "========================================="
-echo " Running Distributed FS Tests"
-echo "========================================="
-echo ""
+cd "$(dirname "$0")/.."
+source ./scripts/_common.sh
+
+print_banner "Running Distributed FS Tests"
 
 # Check if test-client is running
-if ! docker ps -q -f name=test-client > /dev/null; then
+if [ -z "$(docker ps -q -f name=^test-client$)" ]; then
     echo "Starting test-client container..."
-    docker-compose -f docker-compose-full.yml --profile test up -d test-client
+    compose --profile test up -d test-client
     sleep 5
 fi
 

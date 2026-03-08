@@ -40,11 +40,11 @@ RUN echo '#!/bin/bash' > /usr/local/bin/fs-test && \
     echo 'echo "========================================="' >> /usr/local/bin/fs-test && \
     echo 'echo ""' >> /usr/local/bin/fs-test && \
     echo 'echo "Available commands:"' >> /usr/local/bin/fs-test && \
-    echo 'echo "  mkdir <path>          - Create directory"' >> /usr/local/bin/fs-test && \
-    echo 'echo "  create <path>         - Create file"' >> /usr/local/bin/fs-test && \
-    echo 'echo "  write <path> <data>   - Write to file"' >> /usr/local/bin/fs-test && \
-    echo 'echo "  read <path>           - Read file"' >> /usr/local/bin/fs-test && \
-    echo 'echo "  ls <path>             - List directory"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  mkdir <parent_path> <dirname>              - Create directory"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  create <parent_path> <filename>            - Create file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  write <file_path> <text> [offset]          - Write text to file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  read <file_path> [offset] [size]           - Read file contents"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  ls <directory_path>                        - List directory"' >> /usr/local/bin/fs-test && \
     echo 'echo ""' >> /usr/local/bin/fs-test && \
     echo 'echo "Frontend servers available:"' >> /usr/local/bin/fs-test && \
     echo 'echo "  - frontend-1:60051"' >> /usr/local/bin/fs-test && \
@@ -52,7 +52,7 @@ RUN echo '#!/bin/bash' > /usr/local/bin/fs-test && \
     echo 'echo "  - frontend-3:60053"' >> /usr/local/bin/fs-test && \
     echo 'echo ""' >> /usr/local/bin/fs-test && \
     echo 'echo "Usage: /app/bin/distributed_client <frontend-host:port> <command> [args...]"' >> /usr/local/bin/fs-test && \
-    echo 'echo "Example: /app/bin/distributed_client frontend-1:60051 mkdir /testdir"' >> /usr/local/bin/fs-test && \
+    echo 'echo "Example: /app/bin/distributed_client frontend-1:60051 write /mydir/file.txt \"hello\""' >> /usr/local/bin/fs-test && \
     echo 'echo ""' >> /usr/local/bin/fs-test && \
     chmod +x /usr/local/bin/fs-test
 
