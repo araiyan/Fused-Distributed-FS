@@ -11,10 +11,22 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
-set -a
-# shellcheck disable=SC1090
-. "$ENV_FILE"
-set +a
+read_env_value() {
+    local key="$1"
+    local raw
+    raw=$(grep -E "^[[:space:]]*${key}=" "$ENV_FILE" | tail -n1 | sed -E "s/^[[:space:]]*${key}=//")
+    # Trim surrounding single/double quotes if present.
+    raw="${raw#\"}"
+    raw="${raw%\"}"
+    raw="${raw#\'}"
+    raw="${raw%\'}"
+    printf "%s" "$raw"
+}
+
+NODE_ID="$(read_env_value NODE_ID)"
+TOTAL_NODES="$(read_env_value TOTAL_NODES)"
+PEER_NODES="$(read_env_value PEER_NODES)"
+STORAGE_NODES="$(read_env_value STORAGE_NODES)"
 
 if [ -z "${NODE_ID:-}" ] || [ -z "${TOTAL_NODES:-}" ]; then
     echo "Missing NODE_ID or TOTAL_NODES in $ENV_FILE"
