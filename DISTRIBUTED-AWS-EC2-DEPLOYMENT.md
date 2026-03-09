@@ -83,6 +83,7 @@ LISTEN_PORT=8001
 FRONTEND_GRPC_PORT=60051
 STORAGE_PORT=9000
 GRPC_PORT=50051
+PAXOS_PROPOSAL_TIMEOUT_MS=8000
 PUBLIC_FRONTEND_GRPC_PORT=60051
 PUBLIC_FRONTEND_P2P_PORT=8001
 PUBLIC_STORAGE_TCP_PORT=9000
@@ -100,6 +101,7 @@ LISTEN_PORT=8001
 FRONTEND_GRPC_PORT=60051
 STORAGE_PORT=9000
 GRPC_PORT=50051
+PAXOS_PROPOSAL_TIMEOUT_MS=8000
 PUBLIC_FRONTEND_GRPC_PORT=60051
 PUBLIC_FRONTEND_P2P_PORT=8001
 PUBLIC_STORAGE_TCP_PORT=9000
@@ -117,6 +119,7 @@ LISTEN_PORT=8001
 FRONTEND_GRPC_PORT=60051
 STORAGE_PORT=9000
 GRPC_PORT=50051
+PAXOS_PROPOSAL_TIMEOUT_MS=8000
 PUBLIC_FRONTEND_GRPC_PORT=60051
 PUBLIC_FRONTEND_P2P_PORT=8001
 PUBLIC_STORAGE_TCP_PORT=9000
@@ -178,9 +181,38 @@ Then inside shell:
 - Use Elastic IPs or stable DNS names to avoid broken peer config after reboot.
 - This setup uses insecure gRPC/TCP over the network. For production, add TLS and tighter firewall rules.
 - High cross-region latency can reduce write/read quorum performance.
+- If `Mkdir failed: Failed to commit metadata` appears, increase `PAXOS_PROPOSAL_TIMEOUT_MS` to `12000` or `15000`, then redeploy.
+- On Windows Git Bash, `/app/...` arguments can be auto-converted to `C:/Program Files/Git/...`.
+	`scripts/remote_client.sh` now disables MSYS path conversion automatically.
 
 ## 7. Stop Node
 
 ```bash
 ./scripts/stop_ec2_node.sh deploy/ec2/.env.node
+```
+
+## 8. Quorum Troubleshooting
+
+If client command returns `Failed to commit metadata`, check these on each EC2 node:
+
+```bash
+docker ps
+docker logs --tail 100 frontend-node
+docker logs --tail 100 storage-node
+```
+
+Look for:
+- `[Network] Added peer ...` and ongoing `[Network] Message from node ...`
+- `[Paxos] Proposal timeout set to ...`
+
+If peers are unreachable, verify security groups allow TCP `8001` between nodes.
+If storage is unreachable, verify TCP `9000` between nodes.
+
+Increase timeout and redeploy if needed:
+
+```bash
+# in deploy/ec2/.env.node
+PAXOS_PROPOSAL_TIMEOUT_MS=12000
+
+./scripts/deploy_ec2_node.sh deploy/ec2/.env.node
 ```

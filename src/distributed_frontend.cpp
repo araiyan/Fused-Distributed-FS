@@ -820,7 +820,20 @@ bool initialize_distributed_system(uint32_t node_id, uint16_t listen_port,
     printf("[Network] Started on port %u\n", listen_port);
 
     paxos_set_broadcast_callback(g_paxos, paxos_broadcast_message, g_network);
-    paxos_set_proposal_timeout(g_paxos, 1500);
+
+    const char *proposal_timeout_env = getenv("PAXOS_PROPOSAL_TIMEOUT_MS");
+    uint32_t proposal_timeout_ms = 8000;
+    if (proposal_timeout_env) {
+        long parsed_timeout = strtol(proposal_timeout_env, nullptr, 10);
+        if (parsed_timeout >= 1000 && parsed_timeout <= 60000) {
+            proposal_timeout_ms = (uint32_t)parsed_timeout;
+        } else {
+            printf("[Paxos] Ignoring invalid PAXOS_PROPOSAL_TIMEOUT_MS=%s (using %u ms)\n",
+                   proposal_timeout_env, proposal_timeout_ms);
+        }
+    }
+    paxos_set_proposal_timeout(g_paxos, proposal_timeout_ms);
+    printf("[Paxos] Proposal timeout set to %u ms\n", proposal_timeout_ms);
 
     // 5. Add peer metadata nodes
     for (int i = 0; i < num_peers; i++) {

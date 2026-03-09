@@ -16,4 +16,7 @@ cd "$ROOT_DIR"
 
 docker build -f Dockerfile.interactive -t "$IMAGE" . >/dev/null
 
+# On Git Bash/MSYS, absolute POSIX paths in args can be rewritten to Windows
+# paths (e.g., /app -> C:/Program Files/Git/app). Disable conversion for docker.
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
 docker run --rm -it "$IMAGE" /app/bin/distributed_client "$FRONTEND_ADDR" "$@"

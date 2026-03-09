@@ -11,6 +11,28 @@ if [ ! -f "$ENV_FILE" ]; then
     exit 1
 fi
 
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+
+if [ -z "${NODE_ID:-}" ] || [ -z "${TOTAL_NODES:-}" ]; then
+    echo "Missing NODE_ID or TOTAL_NODES in $ENV_FILE"
+    exit 1
+fi
+
+if [ -z "${PEER_NODES:-}" ]; then
+    echo "PEER_NODES is empty in $ENV_FILE"
+    echo "Expected format: 2@<ip-or-dns>:8001 3@<ip-or-dns>:8001"
+    exit 1
+fi
+
+if [ -z "${STORAGE_NODES:-}" ]; then
+    echo "STORAGE_NODES is empty in $ENV_FILE"
+    echo "Expected format: <node1>:9000 <node2>:9000 <node3>:9000"
+    exit 1
+fi
+
 cd "$ROOT_DIR"
 
 run_compose() {
@@ -48,6 +70,9 @@ echo " Deploying EC2 Node"
 echo "========================================="
 echo "Compose file: $COMPOSE_FILE"
 echo "Env file:     $ENV_FILE"
+echo "Node ID:      ${NODE_ID}"
+echo "Peers:        ${PEER_NODES}"
+echo "Storage:      ${STORAGE_NODES}"
 echo ""
 
 run_compose "up -d --build"
