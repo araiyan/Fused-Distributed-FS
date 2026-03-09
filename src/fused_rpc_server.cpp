@@ -311,21 +311,11 @@ public:
 // ============================================================================
 void RunServer(const std::string &server_address)
 {
-    // Initialize filesystem state (same as fused_init)
-    g_state = (fused_state_t *)calloc(1, sizeof(fused_state_t));
-    snprintf(g_state->backing_dir, MAX_PATH, "/tmp/fused_backing");
-    mkdir(g_state->backing_dir, 0755);
-
-    // Create root directory (same as init_root_inode)
-    fused_inode_t *root = &g_state->inodes[0];
-    root->ino = FUSE_ROOT_ID;
-    root->mode = S_IFDIR | 0755;
-    root->uid = getuid();
-    root->gid = getgid();
-    root->size = 4096;
-    root->atime = root->mtime = root->ctime = time(NULL);
-    root->n_children = 0;
-    g_state->n_inodes = 1;
+    // Reuse the same initialization path used by the FUSE runtime.
+    if (!fused_init(nullptr)) {
+        std::cerr << "Failed to initialize filesystem state" << std::endl;
+        return;
+    }
 
     log_message("Filesystem initialized");
 
@@ -340,6 +330,10 @@ void RunServer(const std::string &server_address)
     builder.RegisterService(&service);
 
     std::unique_ptr<Server> server(builder.BuildAndStart());
+    if (!server) {
+        std::cerr << "Failed to start gRPC server on " << server_address << std::endl;
+        return;
+    }
     std::cout << "Server listening on " << server_address << std::endl;
 
     server->Wait();

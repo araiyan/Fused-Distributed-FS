@@ -35,6 +35,11 @@ void *fused_init(struct fuse_conn_info *conn)
 
     // Allocate global state
     g_state = calloc(1, sizeof(fused_state_t));
+    if (!g_state)
+    {
+        return NULL;
+    }
+
     snprintf(g_state->backing_dir, MAX_PATH, "/tmp/fused_backing");
     mkdir(g_state->backing_dir, 0755);
 
@@ -452,8 +457,17 @@ int fused_mkdir(const char *path, mode_t mode)
 
     // Initialize directory inode
     inode->mode = S_IFDIR | (mode & 0777);
-    inode->uid = fuse_get_context()->uid;
-    inode->gid = fuse_get_context()->gid;
+    struct fuse_context *ctx = fuse_get_context();
+    if (ctx)
+    {
+        inode->uid = ctx->uid;
+        inode->gid = ctx->gid;
+    }
+    else
+    {
+        inode->uid = getuid();
+        inode->gid = getgid();
+    }
     inode->size = 4096;
     inode->atime = time(NULL);
     inode->mtime = inode->atime;
