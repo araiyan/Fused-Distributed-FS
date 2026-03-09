@@ -11,8 +11,8 @@
 
 #define FUSE_USE_VERSION 26
 #define MAX_PATH 256
-#define MAX_CHILDREN 1024
-#define MAX_INODES 4096
+#define MAX_CHILDREN 256
+#define MAX_INODES 1024
 #define FUSE_ROOT_ID 1
 #define MAX_NAME 256
 
