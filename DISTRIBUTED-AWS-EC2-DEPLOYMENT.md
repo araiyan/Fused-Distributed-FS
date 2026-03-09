@@ -11,11 +11,31 @@ You can then run client commands from your laptop or any computer using Docker.
 
 Create 3 Ubuntu EC2 instances (different regions if desired).
 
-Install Docker + Compose plugin on each node:
+Install Docker + Compose on each node:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y docker.io docker-compose-plugin git
+# Works on most default AWS Ubuntu AMIs
+sudo apt-get install -y docker.io docker-compose git make
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+Alternative (if you specifically want `docker compose` plugin):
+
+```bash
+# Add Docker's official apt repo first, then install plugin
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+echo \
+	"deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+	$(. /etc/os-release && echo $VERSION_CODENAME) stable" | \
+	sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin git
 sudo usermod -aG docker $USER
 newgrp docker
 ```
