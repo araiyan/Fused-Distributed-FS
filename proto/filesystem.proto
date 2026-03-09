@@ -5,6 +5,8 @@ package fused;
 service FileSystemService {
   rpc Create(CreateRequest) returns (CreateResponse);
   rpc Mkdir(MkdirRequest) returns (MkdirResponse);
+  rpc Remove(RemoveRequest) returns (RemoveResponse);
+  rpc Rmdir(RmdirRequest) returns (RmdirResponse);
   rpc Write(WriteRequest) returns (WriteResponse);
   rpc Get(GetRequest) returns (GetResponse);
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
@@ -33,6 +35,26 @@ message MkdirRequest {
 }
 
 message MkdirResponse {
+  int32 status_code = 1;
+  string error_message = 2;
+}
+
+// Remove - Delete a file (like rm)
+message RemoveRequest {
+  string pathname = 1;      // Full path to file
+}
+
+message RemoveResponse {
+  int32 status_code = 1;
+  string error_message = 2;
+}
+
+// Rmdir - Delete an empty directory
+message RmdirRequest {
+  string pathname = 1;      // Full path to directory
+}
+
+message RmdirResponse {
   int32 status_code = 1;
   string error_message = 2;
 }

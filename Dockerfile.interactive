@@ -43,6 +43,8 @@ RUN echo '#!/bin/bash' > /usr/local/bin/fs-test && \
     echo 'echo "Available commands:"' >> /usr/local/bin/fs-test && \
     echo 'echo "  mkdir <parent_path> <dirname>              - Create directory"' >> /usr/local/bin/fs-test && \
     echo 'echo "  create <parent_path> <filename>            - Create file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  rm <file_path>                             - Delete file"' >> /usr/local/bin/fs-test && \
+    echo 'echo "  rmdir <directory_path>                     - Delete empty directory"' >> /usr/local/bin/fs-test && \
     echo 'echo "  write <file_path> <text> [offset]          - Write text to file"' >> /usr/local/bin/fs-test && \
     echo 'echo "  read <file_path> [offset] [size]           - Read file contents"' >> /usr/local/bin/fs-test && \
     echo 'echo "  ls <directory_path>                        - List directory"' >> /usr/local/bin/fs-test && \

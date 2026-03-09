@@ -38,8 +38,12 @@ using fused::GetRequest;
 using fused::GetResponse;
 using fused::MkdirRequest;
 using fused::MkdirResponse;
+using fused::RemoveRequest;
+using fused::RemoveResponse;
 using fused::ReadDirectoryRequest;
 using fused::ReadDirectoryResponse;
+using fused::RmdirRequest;
+using fused::RmdirResponse;
 using fused::WriteRequest;
 using fused::WriteResponse;
 using grpc::Server;
@@ -146,6 +150,28 @@ bool path_is_existing_directory(const std::string &path) {
 
     metadata_entry_t *entry = metadata_lookup_by_path(g_metadata, normalized.c_str());
     return entry && entry->state != FILE_STATE_DELETED && S_ISDIR(entry->mode);
+}
+
+bool directory_has_children(const std::string &dir_path) {
+    std::string normalized_dir = trim_trailing_slash(normalize_path(dir_path));
+    metadata_hash_map_t *map = (metadata_hash_map_t *)g_metadata->hash_map;
+
+    for (int i = 0; i < FRONTEND_METADATA_HASH_MAP_SIZE; i++) {
+        metadata_entry_node_t *node = map->buckets[i];
+        while (node) {
+            metadata_entry_t *entry = node->entry;
+            if (entry && entry->state != FILE_STATE_DELETED) {
+                std::string child_name;
+                std::string entry_path = trim_trailing_slash(entry->path);
+                if (is_direct_child_path(normalized_dir, entry_path, child_name)) {
+                    return true;
+                }
+            }
+            node = node->next;
+        }
+    }
+
+    return false;
 }
 
 bool commit_metadata_with_paxos(const metadata_entry_t *entry, const char *operation) {
@@ -430,6 +456,149 @@ public:
         response->set_status_code(0);
         printf("[Frontend] Mkdir success: %s\n", full_path.c_str());
         
+        return Status::OK;
+    }
+
+    /**
+     * Remove - Delete a file
+     */
+    Status Remove(ServerContext *context,
+                  const RemoveRequest *request,
+                  RemoveResponse *response) override {
+        (void)context;
+
+        std::string path = trim_trailing_slash(normalize_path(request->pathname()));
+        if (path == "/") {
+            response->set_status_code(-EINVAL);
+            response->set_error_message("Cannot remove root path");
+            return Status::OK;
+        }
+
+        printf("[Frontend] Remove: path=%s\n", path.c_str());
+
+        pthread_mutex_lock(&g_coordinator_lock);
+
+        metadata_entry_t *entry = metadata_lookup_by_path(g_metadata, path.c_str());
+        if (!entry || entry->state == FILE_STATE_DELETED) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-ENOENT);
+            response->set_error_message("File not found");
+            return Status::OK;
+        }
+
+        if (S_ISDIR(entry->mode)) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-EISDIR);
+            response->set_error_message("Path is a directory; use rmdir");
+            return Status::OK;
+        }
+
+        if (entry->num_storage_nodes > 0) {
+            uint32_t quorum_required = (entry->num_storage_nodes / 2) + 1;
+            uint32_t success_count = 0;
+
+            for (uint32_t i = 0; i < entry->num_storage_nodes; i++) {
+                uint32_t node_id = entry->storage_nodes[i];
+                if (node_id == 0) {
+                    continue;
+                }
+
+                storage_response_t del_resp{};
+                int del_result = storage_interface_delete(g_storage, node_id, entry->file_id, &del_resp);
+                if (del_result == 0 && del_resp.status == 0) {
+                    success_count++;
+                }
+            }
+
+            if (success_count < quorum_required) {
+                pthread_mutex_unlock(&g_coordinator_lock);
+                response->set_status_code(-EIO);
+                response->set_error_message("Delete quorum not reached");
+                printf("[Frontend] Remove failed: quorum %u/%u\n", success_count, entry->num_storage_nodes);
+                return Status::OK;
+            }
+        }
+
+        metadata_entry_t proposed_entry;
+        memset(&proposed_entry, 0, sizeof(proposed_entry));
+        size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+        memcpy(&proposed_entry, entry, copy_len);
+        proposed_entry.state = FILE_STATE_DELETED;
+        proposed_entry.modified_time = time(nullptr);
+        proposed_entry.version = entry->version + 1;
+
+        if (!commit_metadata_with_paxos(&proposed_entry, "remove")) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-EIO);
+            response->set_error_message("Failed to commit metadata");
+            return Status::OK;
+        }
+
+        pthread_mutex_unlock(&g_coordinator_lock);
+        response->set_status_code(0);
+        printf("[Frontend] Remove success: %s\n", path.c_str());
+        return Status::OK;
+    }
+
+    /**
+     * Rmdir - Delete an empty directory
+     */
+    Status Rmdir(ServerContext *context,
+                 const RmdirRequest *request,
+                 RmdirResponse *response) override {
+        (void)context;
+
+        std::string path = trim_trailing_slash(normalize_path(request->pathname()));
+        if (path == "/") {
+            response->set_status_code(-EINVAL);
+            response->set_error_message("Cannot remove root directory");
+            return Status::OK;
+        }
+
+        printf("[Frontend] Rmdir: path=%s\n", path.c_str());
+
+        pthread_mutex_lock(&g_coordinator_lock);
+
+        metadata_entry_t *entry = metadata_lookup_by_path(g_metadata, path.c_str());
+        if (!entry || entry->state == FILE_STATE_DELETED) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-ENOENT);
+            response->set_error_message("Directory not found");
+            return Status::OK;
+        }
+
+        if (!S_ISDIR(entry->mode)) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-ENOTDIR);
+            response->set_error_message("Path is not a directory");
+            return Status::OK;
+        }
+
+        if (directory_has_children(path)) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-ENOTEMPTY);
+            response->set_error_message("Directory is not empty");
+            return Status::OK;
+        }
+
+        metadata_entry_t proposed_entry;
+        memset(&proposed_entry, 0, sizeof(proposed_entry));
+        size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+        memcpy(&proposed_entry, entry, copy_len);
+        proposed_entry.state = FILE_STATE_DELETED;
+        proposed_entry.modified_time = time(nullptr);
+        proposed_entry.version = entry->version + 1;
+
+        if (!commit_metadata_with_paxos(&proposed_entry, "rmdir")) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-EIO);
+            response->set_error_message("Failed to commit metadata");
+            return Status::OK;
+        }
+
+        pthread_mutex_unlock(&g_coordinator_lock);
+        response->set_status_code(0);
+        printf("[Frontend] Rmdir success: %s\n", path.c_str());
         return Status::OK;
     }
 

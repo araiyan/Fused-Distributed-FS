@@ -20,8 +20,12 @@ using fused::GetRequest;
 using fused::GetResponse;
 using fused::MkdirRequest;
 using fused::MkdirResponse;
+using fused::RemoveRequest;
+using fused::RemoveResponse;
 using fused::ReadDirectoryRequest;
 using fused::ReadDirectoryResponse;
+using fused::RmdirRequest;
+using fused::RmdirResponse;
 using fused::WriteRequest;
 using fused::WriteResponse;
 using grpc::Channel;
@@ -89,6 +93,54 @@ public:
         }
 
         std::cout << "✓ File created: " << parent_path << "/" << filename << std::endl;
+        return 0;
+    }
+
+    int RemoveFile(const std::string& path) {
+        RemoveRequest request;
+        request.set_pathname(path);
+
+        RemoveResponse response;
+        ClientContext context;
+        set_deadline(context);
+
+        Status status = stub_->Remove(&context, request, &response);
+
+        if (!status.ok()) {
+            std::cerr << "RPC failed: " << status.error_message() << std::endl;
+            return -1;
+        }
+
+        if (response.status_code() != 0) {
+            std::cerr << "Remove failed: " << response.error_message() << std::endl;
+            return response.status_code();
+        }
+
+        std::cout << "✓ File removed: " << path << std::endl;
+        return 0;
+    }
+
+    int RemoveDirectory(const std::string& path) {
+        RmdirRequest request;
+        request.set_pathname(path);
+
+        RmdirResponse response;
+        ClientContext context;
+        set_deadline(context);
+
+        Status status = stub_->Rmdir(&context, request, &response);
+
+        if (!status.ok()) {
+            std::cerr << "RPC failed: " << status.error_message() << std::endl;
+            return -1;
+        }
+
+        if (response.status_code() != 0) {
+            std::cerr << "Rmdir failed: " << response.error_message() << std::endl;
+            return response.status_code();
+        }
+
+        std::cout << "✓ Directory removed: " << path << std::endl;
         return 0;
     }
 
@@ -181,6 +233,8 @@ void print_usage(const char* prog) {
     std::cout << "Commands:" << std::endl;
     std::cout << "  mkdir <parent_path> <dirname>              - Create directory" << std::endl;
     std::cout << "  create <parent_path> <filename>            - Create file" << std::endl;
+    std::cout << "  rm <file_path>                             - Delete file" << std::endl;
+    std::cout << "  rmdir <directory_path>                     - Delete empty directory" << std::endl;
     std::cout << "  write <file_path> <text> [offset]          - Write text to file" << std::endl;
     std::cout << "  read <file_path> [offset] [size]           - Read file contents" << std::endl;
     std::cout << "  ls <directory_path>                        - List directory" << std::endl;
@@ -188,6 +242,8 @@ void print_usage(const char* prog) {
     std::cout << "Examples:" << std::endl;
     std::cout << "  " << prog << " localhost:60051 mkdir / videos" << std::endl;
     std::cout << "  " << prog << " localhost:60051 create /videos test.txt" << std::endl;
+    std::cout << "  " << prog << " localhost:60051 rm /videos/test.txt" << std::endl;
+    std::cout << "  " << prog << " localhost:60051 rmdir /videos" << std::endl;
     std::cout << "  " << prog << " localhost:60051 write /videos/test.txt \"Hello World\"" << std::endl;
     std::cout << "  " << prog << " localhost:60051 read /videos/test.txt" << std::endl;
     std::cout << "  " << prog << " localhost:60051 ls /videos" << std::endl;
@@ -220,6 +276,20 @@ int main(int argc, char** argv) {
             return 1;
         }
         return client.Create(argv[3], argv[4]);
+    }
+    else if (command == "rm") {
+        if (argc < 4) {
+            std::cerr << "Usage: rm <file_path>" << std::endl;
+            return 1;
+        }
+        return client.RemoveFile(argv[3]);
+    }
+    else if (command == "rmdir") {
+        if (argc < 4) {
+            std::cerr << "Usage: rmdir <directory_path>" << std::endl;
+            return 1;
+        }
+        return client.RemoveDirectory(argv[3]);
     }
     else if (command == "write") {
         if (argc < 5) {

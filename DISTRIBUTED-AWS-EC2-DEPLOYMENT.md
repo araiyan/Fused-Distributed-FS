@@ -162,6 +162,8 @@ From your laptop (or any machine with Docker), clone repo and run:
 ./scripts/remote_client.sh <NODE1_PUBLIC_IP_OR_DNS>:60051 create /mydir file.txt
 ./scripts/remote_client.sh <NODE1_PUBLIC_IP_OR_DNS>:60051 write /mydir/file.txt 'Hello from remote client'
 ./scripts/remote_client.sh <NODE1_PUBLIC_IP_OR_DNS>:60051 read /mydir/file.txt
+./scripts/remote_client.sh <NODE1_PUBLIC_IP_OR_DNS>:60051 rm /mydir/file.txt
+./scripts/remote_client.sh <NODE1_PUBLIC_IP_OR_DNS>:60051 rmdir /mydir
 ./scripts/remote_client.sh <NODE1_PUBLIC_IP_OR_DNS>:60051 ls /mydir
 ```
 
@@ -178,6 +180,8 @@ Then inside shell:
 /app/bin/distributed_client <NODE1_PUBLIC_IP_OR_DNS>:60051 create /mydir file.txt
 /app/bin/distributed_client <NODE1_PUBLIC_IP_OR_DNS>:60051 write /mydir/file.txt 'Hello World'
 /app/bin/distributed_client <NODE1_PUBLIC_IP_OR_DNS>:60051 read /mydir/file.txt
+/app/bin/distributed_client <NODE1_PUBLIC_IP_OR_DNS>:60051 rm /mydir/file.txt
+/app/bin/distributed_client <NODE1_PUBLIC_IP_OR_DNS>:60051 rmdir /mydir
 ```
 
 ## 6. Notes
