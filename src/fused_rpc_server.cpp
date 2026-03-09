@@ -7,6 +7,7 @@
 #include <grpcpp/health_check_service_interface.h>
 #include <grpcpp/ext/proto_server_reflection_plugin.h>
 #include "filesystem.grpc.pb.h"
+#include <cerrno>
 
 extern "C"
 {
@@ -311,11 +312,32 @@ public:
 // ============================================================================
 void RunServer(const std::string &server_address)
 {
-    // Reuse the same initialization path used by the FUSE runtime.
-    if (!fused_init(nullptr)) {
-        std::cerr << "Failed to initialize filesystem state" << std::endl;
+    // Initialize in-memory filesystem state for RPC mode (no FUSE mount context).
+    g_state = (fused_state_t *)calloc(1, sizeof(fused_state_t));
+    if (!g_state) {
+        std::cerr << "Failed to allocate filesystem state" << std::endl;
         return;
     }
+
+    snprintf(g_state->backing_dir, MAX_PATH, "/tmp/fused_backing");
+    if (mkdir(g_state->backing_dir, 0755) != 0 && errno != EEXIST) {
+        std::cerr << "Failed to create backing dir: " << g_state->backing_dir
+                  << " errno=" << errno << std::endl;
+        free(g_state);
+        g_state = nullptr;
+        return;
+    }
+
+    // Create root inode.
+    fused_inode_t *root = &g_state->inodes[0];
+    root->ino = FUSE_ROOT_ID;
+    root->mode = S_IFDIR | 0755;
+    root->uid = getuid();
+    root->gid = getgid();
+    root->size = 4096;
+    root->atime = root->mtime = root->ctime = time(NULL);
+    root->n_children = 0;
+    g_state->n_inodes = 1;
 
     log_message("Filesystem initialized");
 
