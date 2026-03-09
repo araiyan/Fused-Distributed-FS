@@ -13,6 +13,36 @@ fi
 
 cd "$ROOT_DIR"
 
+run_compose() {
+    local action="$1"
+
+    if command -v docker-compose >/dev/null 2>&1; then
+        # Prefer docker-compose on hosts where docker compose plugin is missing.
+        if docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+            docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" $action
+            return
+        fi
+
+        # Fallback for older docker-compose versions without --env-file support.
+        local backup_env=""
+        if [ -f .env ]; then
+            backup_env=".env.backup.$$.tmp"
+            cp .env "$backup_env"
+        fi
+
+        cp "$ENV_FILE" .env
+        docker-compose -f "$COMPOSE_FILE" $action
+        rm -f .env
+
+        if [ -n "$backup_env" ] && [ -f "$backup_env" ]; then
+            mv "$backup_env" .env
+        fi
+        return
+    fi
+
+    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" $action
+}
+
 echo "========================================="
 echo " Deploying EC2 Node"
 echo "========================================="
@@ -20,8 +50,8 @@ echo "Compose file: $COMPOSE_FILE"
 echo "Env file:     $ENV_FILE"
 echo ""
 
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
+run_compose "up -d --build"
 
 echo ""
 echo "Container status:"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
+run_compose "ps"

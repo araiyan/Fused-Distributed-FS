@@ -20,6 +20,10 @@ sudo usermod -aG docker $USER
 newgrp docker
 ```
 
+If your host does not support `docker compose --env-file` and shows `unknown flag: --env-file`,
+use the repo scripts (`scripts/deploy_ec2_node.sh` and `scripts/stop_ec2_node.sh`).
+They automatically fall back to `docker-compose` compatibility mode.
+
 Clone this repo on each instance:
 
 ```bash

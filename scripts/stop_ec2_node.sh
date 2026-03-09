@@ -11,4 +11,27 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 cd "$ROOT_DIR"
+
+if command -v docker-compose >/dev/null 2>&1; then
+    if docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+        docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down
+        exit 0
+    fi
+
+    backup_env=""
+    if [ -f .env ]; then
+        backup_env=".env.backup.$$.tmp"
+        cp .env "$backup_env"
+    fi
+
+    cp "$ENV_FILE" .env
+    docker-compose -f "$COMPOSE_FILE" down
+    rm -f .env
+
+    if [ -n "$backup_env" ] && [ -f "$backup_env" ]; then
+        mv "$backup_env" .env
+    fi
+    exit 0
+fi
+
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down
