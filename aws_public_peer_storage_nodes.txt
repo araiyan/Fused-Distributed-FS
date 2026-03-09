@@ -1,0 +1,48 @@
+Node1---
+    loc: N.California (us-west-1)
+    ip: 54.176.177.247
+
+Node2---
+    loc: Canada (ca-central-1)
+    ip: 15.223.40.181
+
+Node3---
+    loc: London (eu-west-2)
+    ip: 18.169.240.85
+
+
+Security Group Rules (per EC2 node)
+-----------------------------------
+
+Inbound
+1) SSH
+    - Protocol: TCP
+    - Port: 22
+    - Source: YourPublicIP/32
+
+2) Frontend gRPC (client access)
+    - Protocol: TCP
+    - Port: 60051
+    - Source: Client IP/CIDR (temporary testing: 0.0.0.0/0)
+
+3) Paxos peer traffic (frontend <-> frontend)
+    - Protocol: TCP
+    - Port: 8001
+    - Source: Other two node public IPs (/32) or peer node security groups
+
+4) Storage traffic (frontend -> storage)
+    - Protocol: TCP
+    - Port: 9000
+    - Source: Other two node public IPs (/32) + this node itself (same SG)
+
+5) Optional storage gRPC debug
+    - Protocol: TCP
+    - Port: 50051
+    - Source: Admin IP only (or omit if not needed)
+
+Outbound
+- Allow all traffic to 0.0.0.0/0 (default is fine)
+
+Required Open Ports Summary
+- 22, 60051, 8001, 9000
+- 50051 optional
