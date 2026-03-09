@@ -51,6 +51,28 @@ run_compose() {
     local action="$1"
 
     if command -v docker-compose >/dev/null 2>&1; then
+        # docker-compose v1.29 can crash with KeyError 'ContainerConfig' on recreate.
+        # For 'up' actions, perform a clean down first to avoid recreate path.
+        if [[ "$action" == up* ]]; then
+            if docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
+                docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" down --remove-orphans || true
+            else
+                local backup_env=""
+                if [ -f .env ]; then
+                    backup_env=".env.backup.$$.tmp"
+                    cp .env "$backup_env"
+                fi
+
+                cp "$ENV_FILE" .env
+                docker-compose -f "$COMPOSE_FILE" down --remove-orphans || true
+                rm -f .env
+
+                if [ -n "$backup_env" ] && [ -f "$backup_env" ]; then
+                    mv "$backup_env" .env
+                fi
+            fi
+        fi
+
         # Prefer docker-compose on hosts where docker compose plugin is missing.
         if docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >/dev/null 2>&1; then
             docker-compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" $action

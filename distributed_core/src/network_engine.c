@@ -498,21 +498,23 @@ int network_engine_broadcast(network_engine_t *engine, message_type_t type,
     }
     
     int success_count = 0;
-    
+
+    uint32_t peer_ids[MAX_PEERS];
+    uint32_t peer_count = 0;
+
     pthread_rwlock_rdlock(&engine->peers_lock);
-    
-    for (uint32_t i = 0; i < engine->num_peers; i++) {
-        if (engine->peers[i].connected) {
-            pthread_rwlock_unlock(&engine->peers_lock);
-            if (network_engine_send(engine, engine->peers[i].node_id, 
-                                   type, payload, payload_len) == 0) {
-                success_count++;
-            }
-            pthread_rwlock_rdlock(&engine->peers_lock);
+    for (uint32_t i = 0; i < engine->num_peers && i < MAX_PEERS; i++) {
+        peer_ids[peer_count++] = engine->peers[i].node_id;
+    }
+    pthread_rwlock_unlock(&engine->peers_lock);
+
+    // Always attempt send to every configured peer. network_engine_send() will
+    // reconnect on demand if the peer socket is currently down.
+    for (uint32_t i = 0; i < peer_count; i++) {
+        if (network_engine_send(engine, peer_ids[i], type, payload, payload_len) == 0) {
+            success_count++;
         }
     }
-    
-    pthread_rwlock_unlock(&engine->peers_lock);
     
     return success_count;
 }

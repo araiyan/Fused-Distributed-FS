@@ -44,6 +44,10 @@ If your host does not support `docker compose --env-file` and shows `unknown fla
 use the repo scripts (`scripts/deploy_ec2_node.sh` and `scripts/stop_ec2_node.sh`).
 They automatically fall back to `docker-compose` compatibility mode.
 
+If you see `KeyError: 'ContainerConfig'` with `docker-compose==1.29.2`,
+the deploy script now performs a clean `down --remove-orphans` before `up`
+to avoid the buggy recreate path.
+
 Clone this repo on each instance:
 
 ```bash
