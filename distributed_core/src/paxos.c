@@ -143,10 +143,17 @@ void paxos_destroy(paxos_node_t *node) {
 /* Generate next unique proposal ID */
 uint64_t paxos_next_proposal_id(paxos_node_t *node) {
     pthread_mutex_lock(&node->state_lock);
-    
-    // Proposal ID format: high bits = counter, low bits = node_id
-    // This ensures global uniqueness and ordering
-    uint64_t proposal_id = ((node->highest_proposal_seen + 1) << 16) | node->node_id;
+
+    // Proposal ID format: high bits = ballot counter, low 16 bits = node_id.
+    // Do not shift the full previous proposal ID, or it will overflow quickly.
+    uint64_t next_ballot = (node->highest_proposal_seen >> 16) + 1;
+    uint64_t proposal_id = (next_ballot << 16) | (node->node_id & 0xFFFFu);
+
+    // Saturate on overflow to avoid wrap-around to small proposal IDs.
+    if (next_ballot == 0) {
+        proposal_id = UINT64_MAX;
+    }
+
     node->highest_proposal_seen = proposal_id;
     
     pthread_mutex_unlock(&node->state_lock);
