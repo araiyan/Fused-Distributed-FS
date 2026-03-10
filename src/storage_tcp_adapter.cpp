@@ -79,6 +79,24 @@ public:
         
         return resp.bytes_read();
     }
+
+    int Delete(const char* file_id) {
+        fused::RemoveRequest req;
+        req.set_pathname(file_id);
+
+        fused::RemoveResponse resp;
+        ClientContext ctx;
+
+        Status status = stub_->Remove(&ctx, req, &resp);
+
+        if (!status.ok() || resp.status_code() != 0) {
+            fprintf(stderr, "[gRPC] Delete failed: %s\n",
+                    resp.error_message().c_str());
+            return -1;
+        }
+
+        return 0;
+    }
 };
 
 StorageClient* g_client = nullptr;
@@ -221,8 +239,20 @@ extern "C" void* handle_client(void* arg) {
         }
     }
     else if (strncmp(buffer, "DELETE|", 7) == 0) {
-        printf(" → Delete (not implemented)\n");
-        send(client_fd, "ERROR|Delete not implemented\n", 30, 0);
+        char file_id[MAX_FILE_ID];
+        if (sscanf(buffer, "DELETE|%63[^\n]\n", file_id) == 1) {
+            printf(" → Delete: %s\n", file_id);
+            int rc = g_client->Delete(file_id);
+            if (rc == 0) {
+                send(client_fd, "OK\n", 3, 0);
+                printf("[TCP] Delete OK\n");
+            } else {
+                send(client_fd, "ERROR|Delete failed\n", 20, 0);
+                printf("[TCP] Delete FAILED\n");
+            }
+        } else {
+            send(client_fd, "ERROR|Invalid DELETE syntax\n", 28, 0);
+        }
     }
     else if (strncmp(buffer, "PING\n", 5) == 0) {
         printf(" → Ping\n");
