@@ -24,6 +24,8 @@ using fused::MkdirRequest;
 using fused::MkdirResponse;
 using fused::ReadDirectoryRequest;
 using fused::ReadDirectoryResponse;
+using fused::RemoveRequest;
+using fused::RemoveResponse;
 using fused::WriteRequest;
 using fused::WriteResponse;
 using grpc::Server;
@@ -236,6 +238,33 @@ public:
         response->set_status_code(0);
 
         log_message("RPC ReadDirectory success: %d entries", dir->n_children);
+        return Status::OK;
+    }
+
+    /**
+     * Remove - Delete a file
+     */
+    Status Remove(ServerContext *context,
+                  const RemoveRequest *request,
+                  RemoveResponse *response) override
+    {
+        (void)context;
+
+        std::string path = normalize_path(request->pathname());
+        log_message("RPC Remove: %s", path.c_str());
+
+        int res = fused_unlink(path.c_str());
+        response->set_status_code(res);
+        if (res < 0)
+        {
+            response->set_error_message(strerror(-res));
+            log_message("RPC Remove failed: %s (%d)", path.c_str(), res);
+        }
+        else
+        {
+            log_message("RPC Remove success: %s", path.c_str());
+        }
+
         return Status::OK;
     }
 

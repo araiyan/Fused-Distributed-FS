@@ -89,9 +89,15 @@ public:
 
         Status status = stub_->Remove(&ctx, req, &resp);
 
-        if (!status.ok() || resp.status_code() != 0) {
-            fprintf(stderr, "[gRPC] Delete failed: %s\n",
-                    resp.error_message().c_str());
+        if (!status.ok()) {
+            fprintf(stderr, "[gRPC] Delete RPC transport failed: code=%d msg=%s\n",
+                    (int)status.error_code(), status.error_message().c_str());
+            return -1;
+        }
+
+        if (resp.status_code() != 0) {
+            fprintf(stderr, "[gRPC] Delete failed: status=%d msg=%s\n",
+                    resp.status_code(), resp.error_message().c_str());
             return -1;
         }
 
