@@ -80,10 +80,23 @@ echo "Reading frontend-3's file from frontend-1:"
 /app/bin/distributed_client frontend-1:60051 read /file_from_frontend3.txt
 echo ""
 
+echo "[Test 9] Removing files and directories..."
+/app/bin/distributed_client $FRONTEND rm /testdir/subdir/file2.txt
+/app/bin/distributed_client $FRONTEND rm /testdir/file1.txt
+/app/bin/distributed_client $FRONTEND rm /data/config.json
+/app/bin/distributed_client frontend-1:60051 rm /file_from_frontend1.txt
+/app/bin/distributed_client frontend-2:60052 rm /file_from_frontend2.txt
+/app/bin/distributed_client frontend-3:60053 rm /file_from_frontend3.txt
+/app/bin/distributed_client $FRONTEND rmdir /testdir/subdir
+/app/bin/distributed_client $FRONTEND rmdir /testdir
+/app/bin/distributed_client $FRONTEND rmdir /data
+echo "✓ Delete operations succeeded"
+echo ""
+
 echo "========================================="
 echo " All Tests Passed!"
 echo "========================================="
 echo ""
 echo "The distributed filesystem is working correctly!"
-echo "All operations (mkdir, create, write, read, ls) are functioning."
+echo "All operations (mkdir, create, write, read, ls, rm, rmdir) are functioning."
 echo ""

@@ -4,6 +4,8 @@ set -euo pipefail
 if [ "$#" -lt 2 ]; then
     echo "Usage: $0 <frontend-host:port> <command> [args...]"
     echo "Example: $0 ec2-44-201-10-20.compute-1.amazonaws.com:60051 mkdir / mydir"
+    echo "Example: $0 ec2-44-201-10-20.compute-1.amazonaws.com:60051 rm /mydir/file.txt"
+    echo "Example: $0 ec2-44-201-10-20.compute-1.amazonaws.com:60051 rmdir /mydir"
     exit 1
 fi
 

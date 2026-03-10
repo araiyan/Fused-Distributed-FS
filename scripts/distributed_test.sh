@@ -88,6 +88,20 @@ for i in {1..10}; do
 done
 echo ""
 
+# Test 10: Remove files and directories
+echo "Test 10: Removing files and directories..."
+$CLIENT $FRONTEND_ADDR rm /videos/shorts/short1.mp4
+$CLIENT $FRONTEND_ADDR rm /videos/test_video.mp4
+$CLIENT $FRONTEND_ADDR rm /documents/readme.txt
+for i in {1..10}; do
+    $CLIENT $FRONTEND_ADDR rm /videos/file_$i.mp4
+done
+$CLIENT $FRONTEND_ADDR rmdir /videos/shorts
+$CLIENT $FRONTEND_ADDR rmdir /videos
+$CLIENT $FRONTEND_ADDR rmdir /documents
+echo "✓ Delete operations successful"
+echo ""
+
 echo "========================================="
 echo " All Tests Completed!"
 echo "========================================="
@@ -99,5 +113,6 @@ echo "  ✓ Data written"
 echo "  ✓ Data read"
 echo "  ✓ Multiple operations"
 echo "  ✓ Stress test passed"
+echo "  ✓ Delete operations passed"
 echo ""
 echo "The distributed filesystem is working!"

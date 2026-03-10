@@ -17,6 +17,9 @@ echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} mkdir / mydir"
 echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} create /mydir file.txt"
 echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} write /mydir/file.txt 'Hello World'"
 echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} read /mydir/file.txt"
+echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} rm /mydir/file.txt"
+echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} rmdir /mydir"
+echo "  /app/bin/distributed_client ${DEFAULT_FRONTEND} ls /"
 echo ""
 
 docker run --rm -it "$IMAGE" bash

@@ -120,6 +120,12 @@ docker exec test-client /app/bin/distributed_client frontend-1:60051 write /vide
 # Read data
 docker exec test-client /app/bin/distributed_client frontend-1:60051 read /videos/test.mp4
 
+# Remove file
+docker exec test-client /app/bin/distributed_client frontend-1:60051 rm /videos/test.mp4
+
+# Remove empty directory
+docker exec test-client /app/bin/distributed_client frontend-1:60051 rmdir /videos
+
 # List directory (if implemented)
 docker exec test-client /app/bin/distributed_client frontend-1:60051 ls /videos
 ```
@@ -258,8 +264,9 @@ The test suite performs:
 2. **File Creation** - Creates multiple test files
 3. **Write Operations** - Writes data to files
 4. **Read Operations** - Reads and verifies data
-5. **Append Operations** - Appends additional data to files
-6. **Stress Test** - Creates and writes to 10 files simultaneously
+5. **Delete Operations** - Removes files (`rm`) and empty directories (`rmdir`)
+6. **Append Operations** - Appends additional data to files
+7. **Stress Test** - Creates and writes to 10 files simultaneously
 
 ## Performance Notes
 
