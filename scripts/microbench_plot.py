@@ -11,7 +11,7 @@ for file in os.listdir(results_dir):
 
         df = pd.read_csv(path)
 
-        avg_latency = df["latency_ns"].mean() / 1e6  # convert to ms
+        avg_latency = df.iloc[:,1].mean() / 1e6  # convert to ms
 
         op_name = file.replace(".csv", "")
         averages[op_name] = avg_latency
