@@ -5,6 +5,10 @@ CLIENT="/app/bin/distributed_client"
 ITERATIONS=1000
 OUTDIR="microbench_results"
 
+if [ -d "$OUTDIR" ]; then
+    # If the directory exists, delete it and all its contents
+    rm -rf "$OUTDIR"
+fi
 mkdir -p $OUTDIR
 
 echo "Starting microbenchmarks..."
