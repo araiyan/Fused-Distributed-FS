@@ -49,3 +49,5 @@ proto/*.pb.cc
 # Benchmark Plot Generation files
 benchmarks/*.png
 benchmarks/*.csv
+
+*.csv

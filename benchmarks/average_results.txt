@@ -1,0 +1,17 @@
+--- RESULTS (Average over 1000 runs) ---
+Average MKDIR:               1.73 ms
+Average CREATE:              1.71 ms
+Average WRITE+SYNC:          1.09 ms
+Average READ:                1.77 ms
+Average LS:                 54.79 ms
+Average RM FILE:             1.61 ms
+Average RMDIR:             216.46 ms
+
+--- DATA SOURCES ---
+MKDIR        ok     100 runs  benchmarks/fused_ops_results_local/mkdir.csv
+CREATE       ok      99 runs  benchmarks/fused_ops_results_local/create.csv
+WRITE+SYNC   ok     100 runs  benchmarks/fused_ops_results_local/write.csv
+READ         ok     100 runs  benchmarks/fused_ops_results_local/read.csv
+LS           ok    1000 runs  scripts/microbench_results/ls.csv
+RM FILE      ok     100 runs  benchmarks/fused_ops_results_local/rm.csv
+RMDIR        ok    1000 runs  scripts/microbench_results/rmdir.csv

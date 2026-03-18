@@ -1,0 +1,6 @@
+--- RESULTS (Average over 100 runs) ---
+Average MKDIR:  FUSED=    1.88 ms | tmpfs=    1.72 ms | overhead=    9.30%
+Average CREATE: FUSED=    1.82 ms | tmpfs=    1.61 ms | overhead=   13.04%
+Average WRITE:  FUSED=    4.64 ms | tmpfs=    4.43 ms | overhead=    4.74%
+Average READ:   FUSED=    1.81 ms | tmpfs=    1.59 ms | overhead=   13.84%
+Average RM:     FUSED=    1.68 ms | tmpfs=    1.52 ms | overhead=   10.53%
