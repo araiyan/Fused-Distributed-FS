@@ -250,8 +250,18 @@ public:
             if (!writer->Write(chunk)) {
                 writer->WritesDone();
                 Status finish_status = writer->Finish();
-                std::cerr << "Upload failed while sending data: "
-                          << finish_status.error_message() << std::endl;
+                if (!finish_status.ok()) {
+                    std::cerr << "Upload failed while sending data: grpc_status="
+                              << finish_status.error_code()
+                              << " message='" << finish_status.error_message()
+                              << "' details='" << finish_status.error_details() << "'"
+                              << std::endl;
+                } else {
+                    std::cerr << "Upload failed while sending data: server_status="
+                              << response.status_code()
+                              << " message='" << response.error_message() << "'"
+                              << std::endl;
+                }
                 return -1;
             }
 
@@ -275,8 +285,18 @@ public:
         if (!writer->Write(final_chunk)) {
             writer->WritesDone();
             Status finish_status = writer->Finish();
-            std::cerr << "Upload failed while sending final marker: "
-                      << finish_status.error_message() << std::endl;
+            if (!finish_status.ok()) {
+                std::cerr << "Upload failed while sending final marker: grpc_status="
+                          << finish_status.error_code()
+                          << " message='" << finish_status.error_message()
+                          << "' details='" << finish_status.error_details() << "'"
+                          << std::endl;
+            } else {
+                std::cerr << "Upload failed while sending final marker: server_status="
+                          << response.status_code()
+                          << " message='" << response.error_message() << "'"
+                          << std::endl;
+            }
             return -1;
         }
 
@@ -284,7 +304,9 @@ public:
         Status status = writer->Finish();
 
         if (!status.ok()) {
-            std::cerr << "RPC failed: " << status.error_message() << std::endl;
+            std::cerr << "RPC failed: grpc_status=" << status.error_code()
+                      << " message='" << status.error_message()
+                      << "' details='" << status.error_details() << "'" << std::endl;
             return -1;
         }
 
