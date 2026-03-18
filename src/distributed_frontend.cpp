@@ -44,11 +44,14 @@ using fused::ReadDirectoryRequest;
 using fused::ReadDirectoryResponse;
 using fused::RmdirRequest;
 using fused::RmdirResponse;
+using fused::UploadChunk;
+using fused::UploadResponse;
 using fused::WriteRequest;
 using fused::WriteResponse;
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
+using grpc::ServerReader;
 using grpc::Status;
 
 // Global components
@@ -716,6 +719,271 @@ public:
         }
 
         pthread_mutex_unlock(&g_coordinator_lock);
+        return Status::OK;
+    }
+
+    /**
+     * Upload - Stream file data through frontend and write directly to storage replicas.
+     * Metadata is committed through Paxos on create and finalize.
+     */
+    Status Upload(ServerContext *context,
+                  ServerReader<UploadChunk> *reader,
+                  UploadResponse *response) override {
+        (void)context;
+
+        UploadChunk chunk;
+        bool received_any = false;
+        bool created_file = false;
+        bool seen_last = false;
+
+        std::string parent_path;
+        std::string filename;
+        std::string full_path;
+        metadata_entry_t upload_entry;
+        memset(&upload_entry, 0, sizeof(upload_entry));
+
+        uint64_t expected_offset = 0;
+        uint64_t total_uploaded = 0;
+
+        auto cleanup_upload = [&]() {
+            if (!created_file) {
+                return;
+            }
+
+            for (uint32_t i = 0; i < upload_entry.num_storage_nodes; i++) {
+                uint32_t node_id = upload_entry.storage_nodes[i];
+                if (node_id == 0) {
+                    continue;
+                }
+                storage_response_t cleanup_resp{};
+                (void)storage_interface_delete(g_storage, node_id, upload_entry.file_id, &cleanup_resp);
+            }
+
+            pthread_mutex_lock(&g_coordinator_lock);
+            metadata_entry_t *current = metadata_lookup_by_path(g_metadata, full_path.c_str());
+            if (current && current->state != FILE_STATE_DELETED) {
+                metadata_entry_t proposed_entry;
+                memset(&proposed_entry, 0, sizeof(proposed_entry));
+                size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+                memcpy(&proposed_entry, current, copy_len);
+                proposed_entry.state = FILE_STATE_DELETED;
+                proposed_entry.modified_time = time(nullptr);
+                proposed_entry.version = current->version + 1;
+                (void)commit_metadata_with_paxos(&proposed_entry, "upload_abort");
+            }
+            pthread_mutex_unlock(&g_coordinator_lock);
+        };
+
+        while (reader->Read(&chunk)) {
+            if (seen_last) {
+                cleanup_upload();
+                response->set_status_code(-EINVAL);
+                response->set_error_message("Upload stream contains data after final chunk marker");
+                response->set_bytes_uploaded(total_uploaded);
+                return Status::OK;
+            }
+
+            if (!received_any) {
+                if (!chunk.is_first()) {
+                    response->set_status_code(-EINVAL);
+                    response->set_error_message("First upload chunk must set is_first=true");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                parent_path = trim_trailing_slash(normalize_path(chunk.parent_path()));
+                filename = chunk.filename();
+                mode_t mode = static_cast<mode_t>(chunk.mode() ? chunk.mode() : 0644);
+
+                if (!is_valid_name_component(filename)) {
+                    response->set_status_code(-EINVAL);
+                    response->set_error_message("Invalid filename");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                if (!path_is_existing_directory(parent_path)) {
+                    response->set_status_code(-ENOENT);
+                    response->set_error_message("Parent directory not found");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                full_path = join_path(parent_path, filename);
+
+                pthread_mutex_lock(&g_coordinator_lock);
+
+                metadata_entry_t *existing = metadata_lookup_by_path(g_metadata, full_path.c_str());
+                if (existing && existing->state != FILE_STATE_DELETED) {
+                    pthread_mutex_unlock(&g_coordinator_lock);
+                    response->set_status_code(-EEXIST);
+                    response->set_error_message("File already exists");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                metadata_entry_t proposed_entry;
+                memset(&proposed_entry, 0, sizeof(proposed_entry));
+                std::string file_id = generate_file_id(full_path);
+                strncpy(proposed_entry.file_id, file_id.c_str(), sizeof(proposed_entry.file_id) - 1);
+                strncpy(proposed_entry.path, full_path.c_str(), sizeof(proposed_entry.path) - 1);
+                proposed_entry.state = FILE_STATE_ACTIVE;
+                proposed_entry.size = 0;
+                proposed_entry.mode = S_IFREG | mode;
+                proposed_entry.uid = getuid();
+                proposed_entry.gid = getgid();
+                proposed_entry.created_time = time(nullptr);
+                proposed_entry.modified_time = proposed_entry.created_time;
+                proposed_entry.accessed_time = proposed_entry.created_time;
+                proposed_entry.version = 1;
+                proposed_entry.stripe_size = 4194304;
+
+                uint32_t selected_nodes[MAX_REPLICAS];
+                int num_selected = storage_interface_select_nodes(
+                    g_storage, 0, MAX_REPLICAS, selected_nodes);
+
+                if (num_selected <= 0) {
+                    pthread_mutex_unlock(&g_coordinator_lock);
+                    response->set_status_code(-ENODEV);
+                    response->set_error_message("No available storage nodes");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                for (int i = 0; i < num_selected && i < MAX_STORAGE_NODES; i++) {
+                    storage_node_info_t *node = storage_interface_get_node(g_storage, selected_nodes[i]);
+                    if (node) {
+                        strncpy(proposed_entry.storage_node_ips[i], node->ip_address, 63);
+                        proposed_entry.storage_node_ports[i] = node->port;
+                        proposed_entry.storage_nodes[i] = selected_nodes[i];
+                    }
+                }
+                proposed_entry.num_storage_nodes = num_selected;
+                proposed_entry.num_replicas = num_selected;
+                proposed_entry.primary_node_idx = 0;
+
+                if (!commit_metadata_with_paxos(&proposed_entry, "upload_create")) {
+                    pthread_mutex_unlock(&g_coordinator_lock);
+                    response->set_status_code(-EIO);
+                    response->set_error_message("Failed to commit upload create metadata");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                metadata_entry_t *created = metadata_lookup_by_path(g_metadata, full_path.c_str());
+                if (!created || created->state == FILE_STATE_DELETED) {
+                    pthread_mutex_unlock(&g_coordinator_lock);
+                    response->set_status_code(-EIO);
+                    response->set_error_message("Uploaded file metadata not visible after create");
+                    response->set_bytes_uploaded(0);
+                    return Status::OK;
+                }
+
+                size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+                memcpy(&upload_entry, created, copy_len);
+                pthread_mutex_unlock(&g_coordinator_lock);
+
+                created_file = true;
+            }
+
+            received_any = true;
+
+            if (chunk.offset() != static_cast<int64_t>(expected_offset)) {
+                cleanup_upload();
+                response->set_status_code(-EINVAL);
+                response->set_error_message("Upload chunks must use contiguous offsets");
+                response->set_bytes_uploaded(total_uploaded);
+                return Status::OK;
+            }
+
+            const std::string &data = chunk.data();
+            if (!data.empty()) {
+                uint32_t quorum_required = (upload_entry.num_storage_nodes / 2) + 1;
+                uint32_t success_count = 0;
+
+                for (uint32_t i = 0; i < upload_entry.num_storage_nodes; i++) {
+                    uint32_t node_id = upload_entry.storage_nodes[i];
+                    if (node_id == 0) {
+                        continue;
+                    }
+
+                    storage_response_t replica_resp{};
+                    int write_result = storage_interface_write(
+                        g_storage, node_id, upload_entry.file_id,
+                        static_cast<uint64_t>(chunk.offset()),
+                        (const uint8_t *)data.data(), data.size(),
+                        &replica_resp);
+
+                    if (write_result == 0 && replica_resp.status == 0) {
+                        success_count++;
+                    }
+                }
+
+                if (success_count < quorum_required) {
+                    cleanup_upload();
+                    response->set_status_code(-EIO);
+                    response->set_error_message("Upload write quorum not reached");
+                    response->set_bytes_uploaded(total_uploaded);
+                    return Status::OK;
+                }
+
+                total_uploaded += data.size();
+                expected_offset += data.size();
+            }
+
+            if (chunk.is_last()) {
+                seen_last = true;
+            }
+        }
+
+        if (!received_any || !created_file) {
+            response->set_status_code(-EINVAL);
+            response->set_error_message("Upload stream is empty");
+            response->set_bytes_uploaded(0);
+            return Status::OK;
+        }
+
+        if (!seen_last) {
+            cleanup_upload();
+            response->set_status_code(-EINVAL);
+            response->set_error_message("Upload stream missing final chunk marker");
+            response->set_bytes_uploaded(total_uploaded);
+            return Status::OK;
+        }
+
+        pthread_mutex_lock(&g_coordinator_lock);
+        metadata_entry_t *current = metadata_lookup_by_path(g_metadata, full_path.c_str());
+        if (!current || current->state == FILE_STATE_DELETED) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            response->set_status_code(-ENOENT);
+            response->set_error_message("Uploaded file metadata not found during finalize");
+            response->set_bytes_uploaded(total_uploaded);
+            return Status::OK;
+        }
+
+        metadata_entry_t proposed_entry;
+        memset(&proposed_entry, 0, sizeof(proposed_entry));
+        size_t copy_len = sizeof(metadata_entry_t) - sizeof(pthread_rwlock_t);
+        memcpy(&proposed_entry, current, copy_len);
+        proposed_entry.size = total_uploaded;
+        proposed_entry.modified_time = time(nullptr);
+        proposed_entry.version = current->version + 1;
+
+        if (!commit_metadata_with_paxos(&proposed_entry, "upload_finalize")) {
+            pthread_mutex_unlock(&g_coordinator_lock);
+            cleanup_upload();
+            response->set_status_code(-EIO);
+            response->set_error_message("Upload metadata finalize failed");
+            response->set_bytes_uploaded(total_uploaded);
+            return Status::OK;
+        }
+
+        pthread_mutex_unlock(&g_coordinator_lock);
+
+        response->set_status_code(0);
+        response->set_bytes_uploaded(total_uploaded);
+        response->set_file_path(full_path);
+        printf("[Frontend] Upload success: %s (%lu bytes)\n", full_path.c_str(), total_uploaded);
         return Status::OK;
     }
 

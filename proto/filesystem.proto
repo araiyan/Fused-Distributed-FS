@@ -8,6 +8,7 @@ service FileSystemService {
   rpc Remove(RemoveRequest) returns (RemoveResponse);
   rpc Rmdir(RmdirRequest) returns (RmdirResponse);
   rpc Write(WriteRequest) returns (WriteResponse);
+  rpc Upload(stream UploadChunk) returns (UploadResponse);
   rpc Get(GetRequest) returns (GetResponse);
   rpc ReadDirectory(ReadDirectoryRequest) returns (ReadDirectoryResponse);
   
@@ -70,6 +71,25 @@ message WriteResponse {
   int64 bytes_written = 1;  // Number of bytes written
   int32 status_code = 2;    // 0 = success, negative = error (errno)
   string error_message = 3; // Human-readable error (if any)
+}
+
+// Upload - Streamed file upload via frontend.
+// First chunk must provide parent_path + filename metadata.
+message UploadChunk {
+  string parent_path = 1;   // Destination directory (e.g., "/videos")
+  string filename = 2;      // Destination file name
+  bytes data = 3;           // File content chunk
+  int64 offset = 4;         // Absolute file offset for this chunk
+  bool is_first = 5;        // True for first message in stream
+  bool is_last = 6;         // True for final message in stream
+  uint32 mode = 7;          // Optional file mode (default 0644)
+}
+
+message UploadResponse {
+  int64 bytes_uploaded = 1; // Total uploaded bytes
+  int32 status_code = 2;    // 0 = success, negative = error
+  string error_message = 3;
+  string file_path = 4;     // Final uploaded path
 }
 
 // Get - Read file contents (like cat)
